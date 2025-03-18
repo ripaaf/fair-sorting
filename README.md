@@ -37,5 +37,7 @@ _(Only some formats, such as `.jpg`, `.png`, `.gif`, `.mp4`, and `.opus`, have b
 | `← (Left Arrow)` | Go to the previous file |
 | `→ (Right Arrow)` | Go to the next file |
 | `Ctrl + Z` | Undo last move |
+| `Right Click (in the photo)` | show where the file located |
+| `Right Click (in log area)` | show where the file located/preview image |
 
 ---

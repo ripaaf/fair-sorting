@@ -3,6 +3,8 @@ a manual photo sorter using a GUI, complete with log moving and can set the dest
 
 the app itself you can see by the screenshot, it can sort your photo based where do you want it to put into the folder. after you open the app you can choose what folder to load and it automaticly detects all the photo, video, or audio extension from the supported file format in [here](#supported-file-formats).
 
+<img src=screenshot.png>
+
 # how to use
 to use, you can download the [release](https://github.com/ripaaf/fair-sorting/releases/) app from the releases and you can run the exe file. the app UI/UX itself is just basic windows program so maybe it is to plain or either its hard to understand but after you use it for a while you can grip a hand to it.
 
@@ -11,7 +13,7 @@ to use, you can download the [release](https://github.com/ripaaf/fair-sorting/re
 3. **Sort Files**: Use the keybindings to organize files into different folders.
 
 > [!NOTE]  
-> This app is still in pre-release, so if you encounter any errors or bugs, please report them
+> This app is still in pre-release, so if you encounter any errors or bugs, please report them!
 
 
 # Supported File Formats

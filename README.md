@@ -10,7 +10,9 @@ to use, you can download the [release](https://github.com/ripaaf/fair-sorting/re
 2. **Select Destination**: Select a multiple folder for each destination your file want to place.
 3. **Sort Files**: Use the keybindings to organize files into different folders.
 
-⚠ **Note**: This app is still in pre-release, so if you encounter any errors or bugs, please report them!
+> [!NOTE]  
+> This app is still in pre-release, so if you encounter any errors or bugs, please report them
+
 
 # Supported File Formats
 

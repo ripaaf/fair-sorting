@@ -52,3 +52,5 @@ The app automatically generates a logfile upon first use. As seen in the sample 
   - You can select a moved file from the logfile area and undo the move.
   - Right-clicking in the logfile area allows you to view where the file was moved from and preview the image (note: this feature does not work for video and audio files).
 
+
+# Enjoy sorting your files with **Fair-Sorting**! 🚀

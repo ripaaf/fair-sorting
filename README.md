@@ -11,6 +11,8 @@ to use, you can download the [release](https://github.com/ripaaf/fair-sorting/re
 3. **Load a Folder**: Select a folder containing media files.
 4. **Sort Files**: Use the keybindings to organize files into different folders.
 
+⚠ **Note**: This app is still in pre-release, so if you encounter any errors or bugs, please report them!
+
 # Supported File Formats
 
 The Supported file format for the app are these below.

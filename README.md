@@ -1,7 +1,7 @@
 # fair-sorting
 a manual photo sorter using a GUI, complete with log moving and can set the destination.
 
-the app itself you can see by the screenshot, it can sort your photo based where do you want it to put into the folder. after you open the app you can choose what folder to load and it automaticly detects all the photo, video, or audio extension from the supported file format in [here](#supportedfileformat).
+the app itself you can see by the screenshot, it can sort your photo based where do you want it to put into the folder. after you open the app you can choose what folder to load and it automaticly detects all the photo, video, or audio extension from the supported file format in [here](#supported-file-formats).
 
 # Supported File Formats
 

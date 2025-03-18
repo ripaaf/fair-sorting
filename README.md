@@ -6,6 +6,11 @@ the app itself you can see by the screenshot, it can sort your photo based where
 # how to use
 to use, you can download the [release](https://github.com/ripaaf/fair-sorting/releases/) app from the releases and you can run the exe file. also this app is still under development and still in pre release.. so if theres any error or bug please let me know!
 
+1. **Download the App**: Get the latest release from the [Releases](https://github.com/ripaaf/fair-sorting/releases/).
+2. **Run the Application**: Open the `.exe` file to launch the sorter.
+3. **Load a Folder**: Select a folder containing media files.
+4. **Sort Files**: Use the keybindings to organize files into different folders.
+
 # Supported File Formats
 
 The Supported file format for the app are these below.
@@ -19,6 +24,18 @@ The Supported file format for the app are these below.
 ### Audio Formats:
 `.flac`, `.mp3`, `.wav`, `.m4a`, `.ogg`, `.wma`, `.aac`, `.ape`, `.alac`, `.mid`, `.ac3`, `.amr`, `.ra`, `.opus`
 
-just a few format that have been tested like jpg, png, gif, mp4, opus.. all the rest of the format are not yet tested.. but in the code i include it for better use
+_(Only some formats, such as `.jpg`, `.png`, `.gif`, `.mp4`, and `.opus`, have been tested. Others are included for broader support but may not be verified.)_
 
+## Keybindings
 
+| Key | Action |
+|-----|--------|
+| `A` | Set destination folder |
+| `L` | Load folder |
+| `P` | Play/Pause (for audio/video files) |
+| `O` | Open file in an external player |
+| `← (Left Arrow)` | Go to the previous file |
+| `→ (Right Arrow)` | Go to the next file |
+| `Ctrl + Z` | Undo last move |
+
+---

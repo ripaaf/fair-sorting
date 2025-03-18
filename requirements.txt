@@ -1,0 +1,10 @@
+datetime
+math
+os
+shutil
+subprocess
+time
+tkinter
+cv2
+pygame
+Pillow

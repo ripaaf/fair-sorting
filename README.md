@@ -1,15 +1,14 @@
 # fair-sorting
 a manual photo sorter using a GUI, complete with log moving and can set the destination.
 
-the app itself you can see by the screenshot, it can sort your photo based where do you want it to put into the folder. after you open the app you can choose what folder to load and it automaticly detects all the photo, video, or audio extension from the supported file format in [here](#supported-file-formats). 
+the app itself you can see by the screenshot, it can sort your photo based where do you want it to put into the folder. after you open the app you can choose what folder to load and it automaticly detects all the photo, video, or audio extension from the supported file format in [here](#supported-file-formats).
 
 # how to use
-to use, you can download the [release](https://github.com/ripaaf/fair-sorting/releases/) app from the releases and you can run the exe file. also this app is still under development and still in pre release.. so if theres any error or bug please let me know!
+to use, you can download the [release](https://github.com/ripaaf/fair-sorting/releases/) app from the releases and you can run the exe file. the app UI/UX itself is just basic windows program so maybe it is to plain or either its hard to understand but after you use it for a while you can grip a hand to it.
 
-1. **Download the App**: Get the latest release from the [Releases](https://github.com/ripaaf/fair-sorting/releases/).
-2. **Run the Application**: Open the `.exe` file to launch the sorter.
-3. **Load a Folder**: Select a folder containing media files.
-4. **Sort Files**: Use the keybindings to organize files into different folders.
+1. **Load a Folder**: Select a folder containing media files.
+2. **Select Destination**: Select a multiple folder for each destination your file want to place.
+3. **Sort Files**: Use the keybindings to organize files into different folders.
 
 ⚠ **Note**: This app is still in pre-release, so if you encounter any errors or bugs, please report them!
 

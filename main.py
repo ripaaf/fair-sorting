@@ -33,6 +33,7 @@ class PhotoVideoViewer:
         self.video_frame_after_id = None
         self.video_capture = None
         self.undo_info = None
+        self.config_file = "fair_config.txt"
 
         # Initialize logfile
         self.logfile = self.create_default_logfile()
@@ -49,6 +50,7 @@ class PhotoVideoViewer:
         self.choose_file_messege()
         self.load_previews()
         self.last_folder_path = self.load_last_folder_path()
+        self.load_destination_paths()
 
     def create_default_logfile(self):
         default_logfile = f"move_log_{datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
@@ -197,7 +199,7 @@ class PhotoVideoViewer:
 
     def preview_image(self, file_path):
         preview_window = tk.Toplevel(self.root)
-        preview_window.title("Image Preview")
+        preview_window.title(os.path.basename(file_path))
         preview_window.geometry("800x600")
         preview_window.tk_setPalette(background='#F0F0F0')
 
@@ -223,17 +225,31 @@ class PhotoVideoViewer:
     def show_move_details(self, source_path, destination_path):
         details_window = tk.Toplevel(self.root)
         details_window.title("Move Details")
-        details_window.geometry("400x200")
+        details_window.geometry("400x300")
         details_window.tk_setPalette(background='#F0F0F0')
 
         details_frame = tk.Frame(details_window, bg='#F0F0F0')
         details_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        source_label = ttk.Label(details_frame, text=f"Source: {source_path}", wraplength=380, background='#F0F0F0')
+        source_label = ttk.Label(details_frame, text=f"Source: {source_path}", wraplength=360, background='#F0F0F0')
         source_label.pack(pady=5)
 
-        destination_label = ttk.Label(details_frame, text=f"Destination: {destination_path}", wraplength=380, background='#F0F0F0')
+        destination_label = ttk.Label(details_frame, text=f"Destination: {destination_path}", wraplength=360, background='#F0F0F0')
         destination_label.pack(pady=5)
+
+        file_size = os.path.getsize(destination_path)
+        size_label = ttk.Label(details_frame, text=f"Size: {self.convert_bytes(file_size)}", wraplength=360, background='#F0F0F0')
+        size_label.pack(pady=5)
+
+        modify_date = self.get_modify_date(destination_path)
+        date_label = ttk.Label(details_frame, text=f"Last Modified: {modify_date}", wraplength=360, background='#F0F0F0')
+        date_label.pack(pady=5)
+
+        if destination_path.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.psd', '.svg', '.raw', '.heic', '.cr2', '.nef', '.orf', '.arw', '.rw2', '.dng', '.xcf', '.pcx')):
+            img = Image.open(destination_path)
+            resolution = f"Resolution: {img.width} x {img.height}"
+            resolution_label = ttk.Label(details_frame, text=resolution, wraplength=360, background='#F0F0F0')
+            resolution_label.pack(pady=5)
 
     def choose_file_messege(self):
         self.photo_label.config(text="please choose folder...\n with photo, video, and music")
@@ -278,12 +294,12 @@ class PhotoVideoViewer:
 
     def load_last_folder_path(self):
         try:
-            with open("last_folder.txt", "r") as file:
-                folder_path = file.read().strip()
-                print(f"Attempting to load folder: {folder_path}")
+            with open(self.config_file, "r") as file:
+                lines = file.readlines()
+                folder_path = lines[0].strip()  # First line is the last folder path
                 self.load_folder_from_path(folder_path)
                 return folder_path
-        except FileNotFoundError:
+        except (FileNotFoundError, IndexError):
             return os.path.expanduser("~")
 
     def load_folder_from_path(self, folder_path):
@@ -309,20 +325,24 @@ class PhotoVideoViewer:
                 self.show_current_file()
 
     def save_last_folder_path(self, folder_path):
-        with open("last_folder.txt", "w") as file:
-            file.write(folder_path)
+        with open(self.config_file, "w") as file:
+            file.write(folder_path + "\n")  # First line is the last folder path
+            for destination in self.destination_folders.keys():
+                file.write(destination + "\n")
 
     def set_destination(self, event=None):
         destination_folder = filedialog.askdirectory()
         if destination_folder:
             self.destination_folders[destination_folder] = []
             self.create_move_button(destination_folder, self.buat_move_button)
+            self.save_last_folder_path(self.last_folder_path)
 
     def add_destination(self):
         destination_folder = filedialog.askdirectory()
         if destination_folder:
             self.destination_folders[destination_folder] = []
             self.create_move_button(destination_folder, self.buat_move_button)
+            self.save_last_folder_path(self.last_folder_path)
 
     def create_move_button(self, destination_folder, parent_frame):
         button_frame = tk.Frame(parent_frame)
@@ -351,6 +371,7 @@ class PhotoVideoViewer:
             key_label.destroy()
             del self.destination_folders[destination_folder]
             self.update_layout()
+            self.save_last_folder_path(self.last_folder_path)
 
     def update_layout(self):
         for i, folder in enumerate(self.destination_folders.keys()):
@@ -358,6 +379,24 @@ class PhotoVideoViewer:
             move_button.grid(row=i, column=2, padx=0, pady=10, sticky=tk.E)
             remove_button.grid(row=i, column=1, padx=2, pady=0, sticky=tk.E)
             key_label.grid(row=i, column=0, padx=0, pady=5, sticky=tk.E)
+
+    def save_last_folder_path(self, folder_path):
+        self.last_folder_path = folder_path
+        with open(self.config_file, "w") as file:
+            file.write(folder_path + "\n")  # First line is the last folder path
+            for destination in self.destination_folders.keys():
+                file.write(destination + "\n")
+
+    def load_destination_paths(self):
+        try:
+            with open(self.config_file, "r") as file:
+                lines = file.readlines()[1:]  # Skip the first line (last folder path)
+                for line in lines:
+                    destination_folder = line.strip()
+                    self.destination_folders[destination_folder] = []
+                    self.create_move_button(destination_folder, self.buat_move_button)
+        except FileNotFoundError:
+            pass
 
     @staticmethod
     def convert_bytes(size_bytes):
@@ -726,17 +765,17 @@ class PhotoVideoViewer:
             self.show_current_file()
 
     def select_logfile(self):
-        logfile_path = filedialog.askopenfilename(
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-            title="Select Logfile"
-        )
-        if logfile_path:
-            self.logfile = logfile_path
-            self.logfile_name_label.config(text=f"name: {os.path.basename(self.logfile)}")
-            self.clear_log_area()
-            self.load_log()
-            self.use_last_logfile_button.config(state=tk.NORMAL)
+            logfile_path = filedialog.askopenfilename(
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+                title="Select Logfile"
+            )
+            if logfile_path:
+                self.logfile = logfile_path
+                self.logfile_name_label.config(text=f"name: {os.path.basename(self.logfile)}")
+                self.clear_log_area()
+                self.load_log()
+                self.use_last_logfile_button.config(state=tk.NORMAL)
 
     def use_last_logfile(self):
         log_files = [f for f in os.listdir() if f.startswith("move_log_") and f.endswith(".txt")]

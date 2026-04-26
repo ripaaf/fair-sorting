@@ -1,10 +1,14 @@
 datetime
 math
 os
-shutil
+psutil
 subprocess
 time
 tkinter
-cv2
+opencv-python
+numpy
 pygame
 Pillow
+imageio
+pillow-heif
+streamlit

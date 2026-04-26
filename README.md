@@ -61,5 +61,5 @@ The app automatically generates a logfile upon first use. As seen in the sample 
 
 # Enjoy sorting your files with **Fair-Sorting**! 🚀
 
-<img src=cutecom.png>
+<img src=image/cutecom.png>
 

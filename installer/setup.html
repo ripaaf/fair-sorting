@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fair Sorting Setup</title>
+<style>
+:root {
+  --bg: #121114; --stage: #0b0a0d; --surface: #19171c; --surface-2: #211f25; --surface-3: #2a272f;
+  --line: #2b2830; --line-2: #3a363f; --text: #f2eee8; --text-2: #c3bcc6; --muted: #8a838f;
+  --accent: #ff8fab; --accent-strong: #ff7398; --accent-ink: #2a0a14; --danger: #ff7b6c;
+  --dot: rgba(242, 238, 232, .075);
+  --font-body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Bahnschrift", "Arial Narrow", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 13.5px/1.45 var(--font-body); overflow: hidden; user-select: none; -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+
+.shell { height: 100%; display: grid; grid-template-columns: 280px 1fr; }
+.side {
+  position: relative; padding: 32px 28px 26px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  background-color: var(--stage);
+  background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.6px);
+  background-size: 22px 22px;
+  border-right: 1px solid var(--line);
+}
+.crop { position: absolute; width: 14px; height: 14px; border: 0 solid var(--line-2); }
+.crop.tl { top: 12px; left: 12px; border-top-width: 1.5px; border-left-width: 1.5px; }
+.crop.br { bottom: 12px; right: 12px; border-bottom-width: 1.5px; border-right-width: 1.5px; }
+.mascot { width: 88px; transform: rotate(-6deg); display: block; }
+.word { margin: 22px 0 12px; font: 700 58px/.84 var(--font-display); font-stretch: 75%; letter-spacing: -.03em; text-transform: lowercase; }
+.word em { font-style: normal; color: transparent; -webkit-text-stroke: 1.3px var(--text); }
+.spark { color: var(--accent); font-size: 18px; vertical-align: top; margin-left: 2px; }
+.mono { font: 500 11px var(--font-mono); color: var(--muted); letter-spacing: .04em; }
+
+.main { padding: 34px 34px 24px; display: flex; flex-direction: column; min-width: 0; }
+section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; animation: in 220ms cubic-bezier(.22, 1, .36, 1); }
+@keyframes in { from { opacity: 0; transform: translateY(6px); } }
+h1 { margin: 0; font: 700 32px/1 var(--font-display); font-stretch: 75%; letter-spacing: -.015em; }
+p { margin: 0; color: var(--text-2); }
+.label { margin: 18px 0 4px; font: 500 11px var(--font-mono); color: var(--muted); letter-spacing: .06em; text-transform: lowercase; }
+.path { display: flex; gap: 6px; }
+.path code {
+  flex: 1; min-width: 0; height: 36px; display: flex; align-items: center; padding: 0 11px;
+  border: 1px solid var(--line-2); border-radius: 7px; background: var(--surface);
+  font: 12px var(--font-mono); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  direction: rtl; text-align: left; user-select: text;
+}
+.check { display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; color: var(--text); width: max-content; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.err { margin-top: 12px; padding: 10px 12px; border-radius: 7px; background: rgba(255, 123, 108, .12); color: var(--text); font-size: 12.5px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 36px; padding: 0 16px; border: 1px solid var(--line-2); border-radius: 7px;
+  background: var(--surface-2); color: var(--text); font: 500 13px var(--font-body); cursor: pointer;
+  transition: background 120ms, transform 120ms;
+}
+.btn:hover:not(:disabled) { background: var(--surface-3); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-ink); font-weight: 600; min-width: 108px; }
+.btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn.ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.key { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 5px; font: 600 10px var(--font-mono); color: var(--text-2); background: linear-gradient(#312d36, #1e1c22); }
+
+.foot { margin-top: auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 18px; }
+.foot .note { margin-right: auto; }
+
+.big { margin-top: 18px; font: 700 96px/.85 var(--font-display); font-stretch: 75%; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.big small { font-size: 36px; color: transparent; -webkit-text-stroke: 1px var(--text-2); }
+.blocks {
+  --block: 9px; --gapb: 3px; position: relative; height: 14px; margin-top: 16px; border-radius: 2px;
+  background: repeating-linear-gradient(90deg, var(--line-2) 0 var(--block), transparent var(--block) calc(var(--block) + var(--gapb)));
+}
+.blocks i {
+  position: absolute; inset: 0 auto 0 0; width: calc(var(--p, 0) * 100%);
+  background: repeating-linear-gradient(90deg, var(--accent) 0 var(--block), transparent var(--block) calc(var(--block) + var(--gapb)));
+  transition: width 160ms linear;
+}
+.stage-line { margin-top: 10px; }
+ul.tips { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; color: var(--text-2); }
+ul.tips li { display: flex; gap: 10px; align-items: center; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <span class="crop tl"></span><span class="crop br"></span>
+    <div>
+      <img class="mascot" src="__MASCOT__" alt="">
+      <div class="word">fair<br><em>sorting</em><span class="spark">&#10022;</span></div>
+      <div class="mono">v__VERSION__ &middot; setup</div>
+    </div>
+    <div class="mono">installs just for you<br>no admin rights needed</div>
+  </aside>
+
+  <main class="main">
+    <section id="welcome">
+      <h1 id="title">Install Fair Sorting</h1>
+      <p id="sub">Sort photos, videos and audio into folders with one key press.</p>
+      <div class="label">install to</div>
+      <div class="path"><code id="dir" title="">&nbsp;</code><button class="btn" id="change" type="button">Change&hellip;</button></div>
+      <div class="label">shortcuts</div>
+      <label class="check"><input type="checkbox" id="startmenu" checked> Start menu</label>
+      <label class="check"><input type="checkbox" id="desktop" checked> Desktop</label>
+      <p class="err" id="err" role="alert" hidden></p>
+    </section>
+
+    <section id="progress" hidden>
+      <h1 id="ptitle">Installing&hellip;</h1>
+      <div class="big"><span id="pct">0</span><small>%</small></div>
+      <div class="blocks" aria-hidden="true"><i id="bar"></i></div>
+      <p class="mono stage-line" id="stage">preparing</p>
+    </section>
+
+    <section id="done" hidden>
+      <h1>Installed.</h1>
+      <p id="where">Find Fair Sorting in the Start menu.</p>
+      <ul class="tips">
+        <li><span class="key">L</span> choose a folder &nbsp;<span class="key">A</span> add destinations &nbsp;<span class="key">1</span>&ndash;<span class="key">0</span> sort</li>
+        <li>Uninstall any time from Settings &rsaquo; Apps.</li>
+      </ul>
+      <label class="check" style="margin-top: 14px"><input type="checkbox" id="launch" checked> Open Fair Sorting now</label>
+    </section>
+
+    <div class="foot">
+      <span class="note mono" id="note"></span>
+      <button class="btn ghost" id="cancel" type="button">Cancel</button>
+      <button class="btn primary" id="go" type="button">Install</button>
+    </div>
+  </main>
+</div>
+<script>
+const $ = id => document.getElementById(id)
+let api = null, dir = '', phase = 'welcome', busy = false
+
+function show(id) {
+  for (const s of ['welcome', 'progress', 'done']) $(s).hidden = s !== id
+  phase = id
+}
+function error(message) {
+  show('welcome')
+  $('err').textContent = message
+  $('err').hidden = !message
+  $('go').disabled = false
+  $('cancel').hidden = false
+  busy = false
+}
+
+async function init() {
+  api = window.pywebview.api
+  const info = await api.info()
+  dir = info.dir
+  $('dir').textContent = dir
+  $('dir').title = dir
+  $('note').textContent = info.size_mb ? `${info.size_mb} MB` : ''
+  if (info.existing) {
+    const same = info.existing.version === info.version
+    $('title').textContent = same ? 'Reinstall Fair Sorting' : 'Update Fair Sorting'
+    $('sub').textContent = `Version ${info.existing.version} is installed. Your settings, PIN and destinations stay as they are.`
+    $('go').textContent = same ? 'Reinstall' : 'Update'
+  }
+  if (!info.payload) { error('This setup file is missing the app. Download it again.'); $('go').disabled = true }
+}
+
+async function poll() {
+  const s = await api.progress()
+  const pct = Math.round((s.pct || 0) * 100)
+  $('pct').textContent = pct
+  $('bar').style.setProperty('--p', s.pct || 0)
+  $('stage').textContent = (s.stage || '').toLowerCase()
+  if (s.error) { error(s.error); return }
+  if (s.done) {
+    $('where').textContent = $('desktop').checked && $('startmenu').checked
+      ? 'Find Fair Sorting in the Start menu and on your desktop.'
+      : $('desktop').checked ? 'Find Fair Sorting on your desktop.' : $('startmenu').checked ? 'Find Fair Sorting in the Start menu.' : `It's in ${s.target}.`
+    show('done')
+    $('cancel').hidden = true
+    $('go').textContent = 'Finish'
+    $('go').disabled = false
+    $('note').textContent = ''
+    busy = false
+    return
+  }
+  setTimeout(poll, 120)
+}
+
+$('change').onclick = async () => {
+  if (busy) return
+  const picked = await api.browse(dir)
+  if (picked) { dir = picked; $('dir').textContent = picked; $('dir').title = picked; $('err').hidden = true }
+}
+$('cancel').onclick = () => { if (!busy) api.close() }
+$('go').onclick = async () => {
+  if (busy) return
+  if (phase === 'done') { await api.finish($('launch').checked); return }
+  busy = true
+  $('err').hidden = true
+  $('go').disabled = true
+  $('cancel').hidden = true
+  $('ptitle').textContent = $('go').textContent === 'Install' ? 'Installing…' : 'Updating…'
+  show('progress')
+  await api.install(dir, $('desktop').checked, $('startmenu').checked)
+  poll()
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !busy && document.activeElement?.id !== 'change') { e.preventDefault(); $('go').click() }
+  if (e.key === 'Escape' && !busy) api?.close()
+})
+window.addEventListener('pywebviewready', init)
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+
+# per-user data the app writes next to itself
+output/
+tools/
+fair_settings.json
+fair_config.txt
+move_log_*.txt
+
+# build output and bundled binaries
+FINAL_BUILD/build/
+FINAL_BUILD/dist/
+FINAL_BUILD/ffmpeg/

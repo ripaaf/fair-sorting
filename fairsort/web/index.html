@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#121114">
+<meta name="description" content="Fair Sorting - sort photos, videos and audio into folders with one key press.">
+<title>Fair Sorting</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/app.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <defs>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14.5 4.5 10 9 5.5"/><path d="M4.5 10h10a5 5 0 0 1 0 10H11"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6"/><path d="M4 4v4.6h4.6"/><path d="M12 8v4.2l2.8 1.8"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M4.5 10.5a11 11 0 0 1 15 0"/><path d="M7.6 13.8a6.5 6.5 0 0 1 8.8 0"/><path d="M12 18.2h.01" stroke-width="3"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.2"/><path d="m20 20-4.4-4.4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2a.8.8 0 0 0-1.2.7z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/><rect x="13.5" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.2"/><path d="m20 20-4.4-4.4M11 8.5v5M8.5 11h5"/></symbol>
+    <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.2"/><path d="m20 20-4.4-4.4M8.5 11h5"/></symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4.2h-4.2"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10M19.5 4.5 11 13"/><path d="M17.5 13.5v4.5a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8A1.5 1.5 0 0 1 6 6.5h4.5"/></symbol>
+    <symbol id="i-reveal" viewBox="0 0 24 24"><path d="M3.5 8.5V6.5a2 2 0 0 1 2-2h3.4l2 2h6.6a2 2 0 0 1 2 2v.5"/><path d="M3.5 8.5h17l-1.6 8.9a2 2 0 0 1-2 1.6H7.1a2 2 0 0 1-2-1.6z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l.9 11.2A2 2 0 0 0 9.4 20h5.2a2 2 0 0 0 2-1.8L17.5 7M9.5 7V4.5h5V7"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24"><path d="M5 19h3.5L19 8.5 15.5 5 5 15.5z"/><path d="m13.5 7 3.5 3.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6.5 9.5 5.5 5.5 5.5-5.5"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5.5M6.5 11 12 5.5 17.5 11"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="3" y="6.5" width="18" height="11" rx="2"/><path d="M7 10h.01M10.3 10h.01M13.7 10h.01M17 10h.01M8 14h8" stroke-width="2"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.7"/><path d="m20.5 15.5-4.8-4.8L7 19.5"/></symbol>
+    <symbol id="i-video" viewBox="0 0 24 24"><rect x="3.5" y="6" width="12.5" height="12" rx="2"/><path d="m16 10.2 4.5-2.7v9l-4.5-2.7"/></symbol>
+    <symbol id="i-audio" viewBox="0 0 24 24"><path d="M9 17.5V6.2l10-2v11"/><circle cx="6.6" cy="17.5" r="2.4"/><circle cx="16.6" cy="15.2" r="2.4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3L19.5 9"/><path d="M19.5 4.5V9H15"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4.5 9.5v5h3.5l4.5 4v-13l-4.5 4z"/><path d="M16 9a4.5 4.5 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4.5 9.5v5h3.5l4.5 4v-13l-4.5 4z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 2.5c.7 5.2 2.3 6.8 7.5 7.5-5.2.7-6.8 2.3-7.5 7.5-.7-5.2-2.3-6.8-7.5-7.5 5.2-.7 6.8-2.3 7.5-7.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18" cy="12" r="1.3" fill="currentColor"/></symbol>
+    <symbol id="i-drive" viewBox="0 0 24 24"><rect x="3.5" y="13" width="17" height="6" rx="1.5"/><path d="M3.5 14.5 6 6.5h12l2.5 8M16.5 16h.01" /></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7.5 4.5v15M4 16l3.5 3.5L11 16M16.5 19.5v-15M13 8l3.5-3.5L20 8"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7.5 5v14M16.5 5v14M3.5 9.5h4M3.5 14.5h4M16.5 9.5h4M16.5 14.5h4"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4.5 9V4.5H9M19.5 9V4.5H15M4.5 15v4.5H9M19.5 15v4.5H15"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8h.01" stroke-width="2"/></symbol>
+    <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.5 5.5a4 4 0 0 0 4.9 4.9L11 18.8a2.1 2.1 0 0 1-3-3l8.4-8.4a4 4 0 0 0-1.9-1.9z"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M14.5 4.5v15"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2.5v2.5H14zM17.5 17.5H20V20h-2.5zM14 20h.01M20 14h.01"/></symbol>
+  </defs>
+</svg>
+
+<a class="skip" href="#stage">Skip to viewer</a>
+
+<div class="gate" id="gate" hidden>
+  <form class="gate-card" id="gateForm" autocomplete="off">
+    <img class="gate-mascot" src="/mascot.png" alt="">
+    <h1 class="gate-title display">fair sorting<svg class="ic spark" aria-hidden="true"><use href="#i-spark"/></svg></h1>
+    <p class="gate-copy">Enter the 6-digit PIN shown under <b>Share on Wi-Fi</b> on the computer running Fair Sorting.</p>
+    <input class="gate-pin mono" id="gatePin" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" aria-label="PIN" required>
+    <p class="gate-error" id="gateError" role="alert"></p>
+    <button class="btn primary wide" type="submit">Unlock</button>
+  </form>
+</div>
+
+<div class="app" id="app" data-dock="bottom" data-chrome="full" hidden>
+  <header class="topbar">
+    <div class="brand" title="Fair Sorting">
+      <img class="brand-mascot" src="/mascot.png" alt="">
+      <span class="wordmark"><span class="wm-a">fair</span><span class="wm-b display">sorting</span><svg class="ic spark" aria-hidden="true"><use href="#i-spark"/></svg></span>
+    </div>
+
+    <button class="source-chip" id="sourceBtn" type="button" aria-haspopup="menu">
+      <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>
+      <span class="source-text"><span class="source-name" id="sourceName">No folder yet</span><span class="source-path mono" id="sourcePath"></span></span>
+      <svg class="ic sm" aria-hidden="true"><use href="#i-down"/></svg>
+    </button>
+
+    <div class="seg filters" id="filters" role="tablist" aria-label="Show">
+      <button role="tab" data-kind="all" aria-selected="true">all <span class="n" data-count="all">0</span></button>
+      <button role="tab" data-kind="image" aria-selected="false">photos <span class="n" data-count="image">0</span></button>
+      <button role="tab" data-kind="video" aria-selected="false">videos <span class="n" data-count="video">0</span></button>
+      <button role="tab" data-kind="audio" aria-selected="false">audio <span class="n" data-count="audio">0</span></button>
+    </div>
+
+    <label class="search">
+      <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="search" type="search" placeholder="Search names" aria-label="Search file names" autocomplete="off" spellcheck="false">
+      <kbd class="key">/</kbd>
+    </label>
+
+    <button class="icon-btn" id="sortBtn" type="button" data-tip="Sort order" aria-label="Sort order" aria-haspopup="menu"><svg class="ic" aria-hidden="true"><use href="#i-sort"/></svg></button>
+
+    <div class="top-actions">
+      <button class="btn ghost undo-btn" id="undoBtn" type="button" disabled data-tip="Undo last action  Ctrl+Z">
+        <svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg><span>undo</span><span class="undo-count mono" id="undoCount"></span>
+      </button>
+      <button class="icon-btn info-toggle" id="infoBtn" type="button" aria-label="File details"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg></button>
+      <button class="icon-btn" id="historyBtn" type="button" data-tip="History & move log" aria-label="History and move log"><svg class="ic" aria-hidden="true"><use href="#i-history"/></svg></button>
+      <button class="icon-btn" id="shareBtn" type="button" data-tip="Share on Wi-Fi" aria-label="Share on Wi-Fi"><svg class="ic" aria-hidden="true"><use href="#i-wifi"/></svg><span class="live-dot" id="shareDot" hidden></span></button>
+      <button class="icon-btn" id="settingsBtn" type="button" data-tip="Settings" aria-label="Settings"><svg class="ic" aria-hidden="true"><use href="#i-sliders"/></svg></button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage" tabindex="-1" aria-label="Viewer">
+    <span class="crop tl" aria-hidden="true"></span><span class="crop tr" aria-hidden="true"></span><span class="crop bl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
+    <div class="media-wrap" id="mediaWrap"></div>
+
+    <div class="stage-state" id="stageState" hidden></div>
+
+    <button class="nav prev" id="prevBtn" type="button" aria-label="Previous file"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
+    <button class="nav next" id="nextBtn" type="button" aria-label="Next file"><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button>
+
+    <div class="controls" id="controls" hidden>
+      <div class="ctl-group play-group" id="playGroup">
+        <button class="icon-btn" id="playBtn" type="button" aria-label="Play"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg></button>
+        <span class="time mono" id="timeNow">00:00</span>
+        <input class="seek" id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+        <span class="time mono dim" id="timeTotal">00:00</span>
+        <button class="icon-btn" id="muteBtn" type="button" aria-label="Mute"><svg class="ic" aria-hidden="true"><use href="#i-volume"/></svg></button>
+        <input class="volume" id="volume" type="range" min="0" max="100" value="100" aria-label="Volume">
+      </div>
+      <div class="ctl-group zoom-group" id="zoomGroup">
+        <button class="icon-btn" id="zoomOutBtn" type="button" aria-label="Zoom out"><svg class="ic" aria-hidden="true"><use href="#i-zoom-out"/></svg></button>
+        <button class="zoom-read mono" id="zoomRead" type="button" data-tip="Reset zoom  Ctrl+0">100%</button>
+        <button class="icon-btn" id="zoomInBtn" type="button" aria-label="Zoom in"><svg class="ic" aria-hidden="true"><use href="#i-zoom-in"/></svg></button>
+        <button class="icon-btn" id="rotateBtn" type="button" aria-label="Rotate view" data-tip="Rotate view  R"><svg class="ic" aria-hidden="true"><use href="#i-rotate"/></svg></button>
+      </div>
+      <div class="ctl-group">
+        <button class="icon-btn" id="fixBtn" type="button" data-tip="Playback looks wrong? Convert it" aria-label="Convert for playback" hidden><svg class="ic" aria-hidden="true"><use href="#i-wrench"/></svg></button>
+        <button class="icon-btn" id="immersiveBtn" type="button" data-tip="Focus mode  F" aria-label="Focus mode"><svg class="ic" aria-hidden="true"><use href="#i-expand"/></svg></button>
+      </div>
+    </div>
+  </main>
+
+  <aside class="inspector" id="inspector" aria-label="File details">
+    <div class="counter display" aria-live="polite"><span class="cur" id="ctrCur">0</span><span class="tot" id="ctrTot">/0</span></div>
+    <div class="file-head">
+      <p class="file-kind mono" id="fileKind">—</p>
+      <h2 class="file-name" id="fileName">Nothing open</h2>
+      <p class="file-folder mono" id="fileFolder"></p>
+    </div>
+    <dl class="meta mono" id="meta"></dl>
+    <div class="file-actions" id="fileActions">
+      <button class="act" id="renameBtn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-pen"/></svg>rename<kbd class="key">F2</kbd></button>
+      <button class="act" id="openBtn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-external"/></svg>open<kbd class="key">O</kbd></button>
+      <button class="act" id="revealBtn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-reveal"/></svg>show in folder<kbd class="key">E</kbd></button>
+      <button class="act danger" id="deleteBtn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg>recycle bin<kbd class="key">Del</kbd></button>
+    </div>
+    <section class="session" aria-label="Session progress">
+      <div class="session-top"><span class="label mono">this session</span><span class="session-pct display" id="sessionPct">0%</span></div>
+      <div class="blocks" id="sessionBar" aria-hidden="true"><i style="--p:0"></i></div>
+      <p class="session-line mono" id="sessionLine">nothing sorted yet</p>
+    </section>
+  </aside>
+
+  <nav class="film" id="film" aria-label="All files">
+    <div class="film-track" id="filmTrack"></div>
+  </nav>
+
+  <section class="deck" id="deck" aria-label="Move to">
+    <header class="deck-head">
+      <span class="label mono">move to</span>
+      <div class="seg banks" id="deckBanks" role="tablist" aria-label="Number key banks" hidden></div>
+      <span class="deck-hint mono" id="deckHint">press <kbd class="key">1</kbd>–<kbd class="key">0</kbd></span>
+      <button class="btn ghost deck-find" id="deckFind" type="button" data-tip="Find any destination  G" hidden><svg class="ic sm" aria-hidden="true"><use href="#i-search"/></svg>all folders</button>
+    </header>
+    <div class="deck-tiles" id="deckTiles"></div>
+  </section>
+</div>
+
+<aside class="drawer" id="drawer" aria-label="History" hidden>
+  <header class="drawer-head">
+    <div class="seg tabs" role="tablist">
+      <button role="tab" data-tab="session" aria-selected="true">this session</button>
+      <button role="tab" data-tab="log" aria-selected="false">move log</button>
+    </div>
+    <button class="icon-btn" id="drawerClose" type="button" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+  </header>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<div class="layer" id="layer"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+</body>
+</html>

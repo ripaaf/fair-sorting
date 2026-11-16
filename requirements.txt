@@ -1,14 +1,10 @@
-datetime
-math
-os
-psutil
-subprocess
-time
-tkinter
-opencv-python
-numpy
-pygame
-Pillow
-imageio
-pillow-heif
-streamlit
+# Fair Sorting 2 - runtime dependencies (Python 3.10+)
+Pillow>=10.0
+pillow-heif>=0.16            # HEIC / HEIF / AVIF photos from phones
+pywebview>=5.0               # native desktop window (uses WebView2 on Windows)
+qrcode>=7.4                  # QR code in "Share on Wi-Fi"
+Send2Trash>=1.8; sys_platform != "win32"   # Recycle Bin on macOS/Linux
+
+# FFmpeg is a separate program, not a pip package. Fair Sorting finds it in
+# ./ffmpeg/bin, ./tools/ffmpeg/bin, FINAL_BUILD/ffmpeg/bin or on PATH, and can
+# download it for you from Settings on Windows.

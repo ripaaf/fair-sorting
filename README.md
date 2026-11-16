@@ -26,11 +26,11 @@ Head to the [releases page](https://github.com/ripaaf/fair-sorting/releases/) an
 
 | Release | What it is | How to use |
 | --- | --- | --- |
-| `Fair Sorting Setup.exe` | Installer | Double-click, press **Install**. Adds Start menu and desktop shortcuts; uninstall from Settings › Apps |
+| `fair-sorting-setup.exe` | Installer | Double-click, press **Install**. Adds Start menu and desktop shortcuts; uninstall from Settings › Apps |
 | `fair-sorting.exe` | Single portable executable | Download and double-click |
 | `fair-sorting-app.zip` | Self-contained app folder (starts faster) | Extract, then run `fair sorting.exe` inside |
 
-All three include FFmpeg. The installer installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\Fair Sorting`, and running a newer Setup updates in place while keeping your settings. For scripted installs: `"Fair Sorting Setup.exe" --silent [--dir D:\Apps] [--no-desktop]`. Windows 10/11 with the Edge WebView2 runtime (already on Windows 11) is all you need.
+All three include FFmpeg. The installer installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\Fair Sorting`, and running a newer Setup updates in place while keeping your settings. For scripted installs: `fair-sorting-setup.exe --silent [--dir D:\Apps] [--no-desktop]`. Windows 10/11 with the Edge WebView2 runtime (already on Windows 11) is all you need.
 
 ## How to use
 

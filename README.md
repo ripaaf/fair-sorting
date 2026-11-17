@@ -7,13 +7,17 @@ A manual media sorter for photos, videos and audio. Open a folder, add the folde
 > [!NOTE]
 > Version 2 is a full rebuild. Your old `fair_config.txt` and every `move_log_*.txt` still work. If something misbehaves, please open an issue.
 
-## What's new in 2.0
+## What's new in 2.x
 
 - **One interface, two ways to open it.** The desktop app and the web version are now the same UI, so they look and behave identically.
 - **Much lighter and faster.** Streamlit, OpenCV, pygame and numpy are gone. Photos and MP4/WebM/MP3 open instantly; only odd formats are converted, once, and cached.
 - **Smarter playback.** Videos and audio play in the built-in player. AVI, WMV, MKV with AC3/DTS audio, WMA and friends are detected with ffprobe and converted automatically, with a progress bar.
 - **Sort from your phone.** "Share on Wi-Fi" shows a QR code and a 6-digit PIN. No more open, unprotected web server.
 - **As many destinations as you like:** number keys work in banks of ten (`[` `]` to switch), and `G` finds any folder by name or number.
+- **Guided tour** on first launch that points at each part of the screen; replay it from Settings.
+- **Endless undo:** `Ctrl+Z` walks back through this session and then the move log, even after a restart.
+- **Album art for audio:** embedded covers or a `cover.jpg` / `folder.jpg` next to the tracks, with title, artist, album and year, a live visualizer and a cover that pulses with the beat.
+- **Little bits of motion:** files fly into the folder you picked, counters roll, themes cross-fade. All of it switches off when Windows' reduce-motion setting is on.
 - **New tools:** filmstrip with thumbnails, search, filters (photos/videos/audio), sort by name/date/size/type, include subfolders, rename (F2), Recycle Bin (Del), multi-step undo, labels for destinations, recent folders, session progress, EXIF details (camera, date taken, exposure), resume where you left off.
 - **New look:** quiet ink/paper themes, condensed display type, mono details, a single pink accent from the mascot.
 
@@ -26,11 +30,11 @@ Head to the [releases page](https://github.com/ripaaf/fair-sorting/releases/) an
 
 | Release | What it is | How to use |
 | --- | --- | --- |
-| `Fair Sorting Setup.exe` | Installer | Double-click, press **Install**. Adds Start menu and desktop shortcuts; uninstall from Settings › Apps |
+| `fair-sorting-setup.exe` | Installer | Double-click, press **Install**. Adds Start menu and desktop shortcuts; uninstall from Settings › Apps |
 | `fair-sorting.exe` | Single portable executable | Download and double-click |
 | `fair-sorting-app.zip` | Self-contained app folder (starts faster) | Extract, then run `fair sorting.exe` inside |
 
-All three include FFmpeg. The installer installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\Fair Sorting`, and running a newer Setup updates in place while keeping your settings. For scripted installs: `"Fair Sorting Setup.exe" --silent [--dir D:\Apps] [--no-desktop]`. Windows 10/11 with the Edge WebView2 runtime (already on Windows 11) is all you need.
+All three include FFmpeg. The installer installs just for you (no admin prompt) into `%LOCALAPPDATA%\Programs\Fair Sorting`, and running a newer Setup updates in place while keeping your settings. For scripted installs: `fair-sorting-setup.exe --silent [--dir D:\Apps] [--no-desktop]`. Windows 10/11 with the Edge WebView2 runtime (already on Windows 11) is all you need.
 
 ## How to use
 
@@ -38,7 +42,9 @@ All three include FFmpeg. The installer installs just for you (no admin prompt) 
 2. **Add destinations** (`A`). Pick several at once; each gets a number key.
 3. **Sort**: press `1`–`0` to move the current file.
    Got more than 10 destinations? They're grouped in banks of ten: `[` / `]` switches the bank the number keys use, `Shift`+`1`–`0` reaches the next bank directly, and `G` opens a picker where you type a name or a number (`23` + `Enter`).
-4. **Undo** with `Ctrl+Z`, as many steps back as you need.
+4. **Undo** with `Ctrl+Z`, as many steps back as you need. Once this session's moves are undone it keeps going back through the move log, so it still works after you restart the app.
+
+The first time you open Fair Sorting a short guided tour walks you through these steps. Replay it any time from Settings › Help.
 
 Moved files never overwrite anything: a name clash becomes `name_1.jpg`, `name_2.jpg`, and so on.
 
@@ -50,7 +56,7 @@ Moved files never overwrite anything: a name clash becomes `name_1.jpg`, `name_2
 | `Shift` + `1` – `0` | Move to a destination in the next bank (11–20 by default) |
 | `[` / `]` | Switch key bank: 1–10, 11–20, 21–30 … |
 | `G` | Move to any destination by name or number |
-| `Ctrl+Z` | Undo (repeat to go further back) |
+| `Ctrl+Z` | Undo (repeat to go further back, all the way through the move log) |
 | `Del` | Move to the Recycle Bin |
 | `F2` | Rename |
 | `←` / `→` | Previous / next file |

@@ -209,6 +209,7 @@ function applyTheme() {
   const dark = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
   const theme = dark ? 'dark' : 'light'
   document.documentElement.dataset.theme = theme
+  A.colors = null
   $('meta[name="theme-color"]').setAttribute('content', dark ? '#121114' : '#f3f0ea')
   if (S.caps.desktop) POST('/api/window/theme', { theme }).catch(() => {})
 }
@@ -223,7 +224,10 @@ function applyLayout() {
 }
 
 function toggleTheme() {
-  const now = document.documentElement.dataset.theme
+  const root = document.documentElement
+  root.classList.add('theme-anim')
+  setTimeout(() => root.classList.remove('theme-anim'), 420)
+  const now = root.dataset.theme
   S.prefs.theme = now === 'dark' ? 'light' : 'dark'
   savePrefs(); applyTheme()
   toast(`${S.prefs.theme === 'dark' ? 'Night' : 'Day'} mode`, { key: 'theme', timeout: 1800 })
@@ -334,7 +338,7 @@ async function doSync() {
       }
       const before = S.curPath
       rebuildView()
-      renderTop(); renderFilm(true)
+      renderTop(); renderFilm(true); renderSession()
       if (S.curPath !== before || !V.file || V.file.p !== S.curPath) show()
       else renderCounter()
     }
@@ -380,25 +384,40 @@ function renderTop() {
   for (const b of $$('#filters button')) b.setAttribute('aria-selected', String(b.dataset.kind === S.filter))
   const undo = m.undo || { count: 0 }
   const btn = $('#undoBtn')
-  btn.disabled = !undo.count
-  btn.dataset.tip = undo.count ? `Undo ${undo.label}  ·  Ctrl+Z` : 'Nothing to undo'
+  btn.disabled = !(undo.count || undo.log)
+  btn.dataset.tip = undo.label ? `Undo: ${undo.label}  ·  Ctrl+Z` : 'Nothing to undo'
   $('#undoCount').textContent = undo.count > 1 ? undo.count : ''
   $('#shareBtn').hidden = !S.caps.share
   $('#shareDot').hidden = !S.lan?.running
   if (S.boot?.mode === 'web' || !S.caps.desktop) document.title = src ? `${baseName(src)} · Fair Sorting` : 'Fair Sorting'
 }
 
+let lastCounter = ''
 function renderCounter() {
   const n = S.view.length
   const width = Math.max(2, String(n).length)
-  $('#ctrCur').textContent = n ? String(S.cur + 1).padStart(width, '0') : '0'.repeat(2)
+  const cur = $('#ctrCur')
+  const text = n ? String(S.cur + 1).padStart(width, '0') : '0'.repeat(2)
+  if (text !== lastCounter && lastCounter && !reduceMotion.matches) {
+    const from = V.dir < 0 ? '-38%' : '38%'
+    cur.animate([{ transform: `translateY(${from})`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 200, easing: 'cubic-bezier(.22,1,.36,1)' })
+  }
+  lastCounter = text
+  cur.textContent = text
   $('#ctrTot').textContent = `/${n}`
+}
+
+function bump(el) {
+  if (!el || reduceMotion.matches) return
+  el.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)' }, { transform: 'scale(1)' }], { duration: 260, easing: 'cubic-bezier(.22,1,.36,1)' })
 }
 
 function renderSession() {
   const st = S.meta?.stats || { total: 0, moved: 0, deleted: 0, renamed: 0, started: Date.now() / 1000 }
   const done = st.moved + st.deleted
-  const pct = st.total ? done / st.total : 0
+  const remaining = S.files.length
+  const total = done + remaining
+  const pct = total ? done / total : 0
   $('#sessionPct').textContent = `${Math.round(pct * 100)}%`
   $('#sessionBar i').style.setProperty('--p', pct)
   const minutes = (Date.now() / 1000 - st.started) / 60
@@ -407,7 +426,7 @@ function renderSession() {
   if (st.deleted) parts.push(`${st.deleted} binned`)
   if (st.renamed) parts.push(`${st.renamed} renamed`)
   if (done >= 3 && minutes >= 1) parts.push(`${(done / minutes).toFixed(1)}/min`)
-  $('#sessionLine').textContent = parts.length ? `${parts.join(' · ')} — ${done} of ${st.total}` : st.total ? `${st.total} files to go` : 'nothing sorted yet'
+  $('#sessionLine').textContent = parts.length ? `${parts.join(' · ')} — ${done} of ${total}` : remaining ? `${remaining} file${remaining === 1 ? '' : 's'} to go` : 'nothing sorted yet'
 }
 
 function metaRows(f, info) {
@@ -512,13 +531,12 @@ function renderFilm(center = false) {
     let node = filmNodes.get(f.p)
     if (!node) {
       node = h('button', { class: 'thumb', type: 'button', title: f.n, 'aria-label': f.n })
-      if (f.k === 'audio') node.append(icon('audio'))
-      else {
-        const img = h('img', { loading: 'lazy', decoding: 'async', alt: '', src: thumbUrl(f, 128) })
-        img.onerror = () => img.replaceWith(icon(KIND_ICON[f.k]))
-        node.append(img)
-        if (f.k === 'video') node.append(icon('play', 'tag'))
-      }
+      const img = h('img', { loading: 'lazy', decoding: 'async', alt: '', src: thumbUrl(f, 128) })
+      img.onerror = () => img.replaceWith(icon(KIND_ICON[f.k]))
+      // Audio only gets a corner badge when it has cover art; otherwise the note glyph says it all.
+      if (f.k === 'audio') img.onload = () => node.append(icon('audio', 'tag'))
+      node.append(img)
+      if (f.k === 'video') node.append(icon('play', 'tag'))
       node.addEventListener('click', () => { const idx = S.view.indexOf(f); if (idx >= 0) go(idx, Math.sign(idx - S.cur)) })
       filmNodes.set(f.p, node)
       track.append(node)
@@ -816,15 +834,41 @@ function stopMedia() {
   stopViz()
 }
 
-function ghostOut() {
+// The outgoing file "flies" into the folder it was sent to (or the bin), then
+// the target reacts. Falls back to a short drop when there's nothing to aim at.
+function ghostOut(target = null, onLand = null) {
   const el = V.el
-  if (!el || reduceMotion.matches || V.kind === 'audio') return
+  const land = () => { try { onLand?.() } catch { /* ignore */ } }
+  if (!el || reduceMotion.matches) { land(); return }
   const stage = $('#stage')
+  const sr = stage.getBoundingClientRect()
+  const r = el.getBoundingClientRect()
+  const box = h('div', { class: 'ghost-fly', 'aria-hidden': 'true' })
+  Object.assign(box.style, {
+    left: `${sr.left}px`, top: `${sr.top}px`, width: `${sr.width}px`, height: `${sr.height}px`,
+    transformOrigin: `${r.left - sr.left + r.width / 2}px ${r.top - sr.top + r.height / 2}px`,
+  })
   el.classList.add('ghost')
-  stage.append(el)
-  const anim = el.animate([{ opacity: 1, translate: '0 0' }, { opacity: 0, translate: '0 34px' }], { duration: 170, easing: 'cubic-bezier(.4,0,1,1)' })
-  anim.onfinish = () => el.remove()
-  setTimeout(() => el.remove(), 400)
+  box.append(el)
+  document.body.append(box)
+  const t = target && target.isConnected && target.offsetParent !== null ? target.getBoundingClientRect() : null
+  let anim
+  if (t && t.width && r.width) {
+    const dx = t.left + t.width / 2 - (r.left + r.width / 2)
+    const dy = t.top + t.height / 2 - (r.top + r.height / 2)
+    const end = Math.max(0.05, Math.min(t.width / r.width, t.height / r.height) * 0.8)
+    anim = box.animate([
+      { transform: 'none', opacity: 1 },
+      { transform: `translate(${dx * 0.45}px, ${dy * 0.45 - 46}px) scale(${(1 + end) / 2.2}) rotate(${dx > 0 ? 4 : -4}deg)`, opacity: 1, offset: 0.5 },
+      { transform: `translate(${dx}px, ${dy}px) scale(${end}) rotate(${dx > 0 ? 8 : -8}deg)`, opacity: 0.15 },
+    ], { duration: 420, easing: 'cubic-bezier(.45,0,.55,1)' })
+  } else {
+    anim = box.animate([{ transform: 'none', opacity: 1 }, { transform: 'translateY(34px) scale(.97)', opacity: 0 }], { duration: 180, easing: 'cubic-bezier(.4,0,1,1)' })
+  }
+  let landed = false
+  const finish = () => { box.remove(); if (!landed) { landed = true; land() } }
+  anim.onfinish = finish
+  setTimeout(finish, 700)
 }
 
 function show() {
@@ -1062,16 +1106,27 @@ function loadAudio(f, token, wrap) {
   const a = audioEl()
   a.pause()
   V.media = a
-  const cover = h('div', { class: 'audio-cover glyph' }, icon('audio'))
+  // Cover art: embedded picture or cover.jpg/folder.jpg next to the track (server decides).
+  const glyph = h('div', { class: 'audio-cover glyph' }, icon('audio'))
+  const art = h('div', { class: 'audio-art' }, glyph)
+  const backdrop = h('div', { class: 'audio-backdrop', 'aria-hidden': 'true' })
   const coverImg = h('img', { class: 'audio-cover', alt: '' })
-  coverImg.onload = () => { if (token === V.token) cover.replaceWith(coverImg) }
+  coverImg.onload = () => {
+    if (token !== V.token) return
+    glyph.replaceWith(coverImg)
+    art.classList.add('has-cover')
+    backdrop.style.backgroundImage = `url("${coverImg.src}")`
+    backdrop.classList.add('on')
+  }
   coverImg.src = thumbUrl(f, 512)
   const title = h('h2', { class: 'audio-title display' }, f.n.replace(/\.[^.]+$/, ''))
-  const sub = h('p', { class: 'audio-sub mono' }, `${extOf(f.n)} · ${fmtBytes(f.s)}`)
+  const sub = h('p', { class: 'audio-sub' }, '')
+  const facts = h('p', { class: 'audio-facts mono' }, `${extOf(f.n)} · ${fmtBytes(f.s)}`)
   const canvas = h('canvas', { class: 'viz', 'aria-hidden': 'true' })
   A.canvas = canvas
-  wrap.replaceChildren(h('div', { class: 'audio-card' }, h('div', { class: 'audio-inner' }, cover, title, sub, canvas)))
-  enterAnim(wrap.firstElementChild)
+  A.art = art
+  wrap.replaceChildren(h('div', { class: 'audio-card' }, backdrop, h('div', { class: 'audio-inner' }, art, title, sub, facts, canvas)))
+  enterAnim(wrap.firstElementChild.lastElementChild)
   bindMediaEvents(a, token)
   a.addEventListener('error', () => {
     if (token !== V.token) return
@@ -1089,20 +1144,25 @@ function updateAudioCard(f, info) {
   if (V.file !== f) return
   const t = info?.tags || {}
   if (t.title) $('.audio-title')?.replaceChildren(t.title)
-  const bits = [t.artist, t.album].filter(Boolean)
-  if (bits.length) $('.audio-sub')?.replaceChildren(bits.join(' · '))
+  const year = (t.date || '').slice(0, 4)
+  const bits = [t.artist || t.album_artist, t.album, /^\d{4}$/.test(year) ? year : ''].filter(Boolean)
+  $('.audio-sub')?.replaceChildren(bits.join(' · '))
+  const facts = [extOf(f.n), info.duration ? fmtTime(info.duration) : '', info.rate ? `${(info.rate / 1000).toFixed(1)} kHz` : '', t.genre || '', fmtBytes(f.s)].filter(Boolean)
+  $('.audio-facts')?.replaceChildren(facts.join(' · '))
 }
 
 function startViz() {
   ensureAnalyser()
+  A.colors = null
   cancelAnimationFrame(A.raf)
   const loop = t => {
     drawViz(t)
     if (A.el && !A.el.paused && V.kind === 'audio') A.raf = requestAnimationFrame(loop)
+    else A.art?.style.setProperty('--beat', 0)
   }
   A.raf = requestAnimationFrame(loop)
 }
-function stopViz() { cancelAnimationFrame(A.raf) }
+function stopViz() { cancelAnimationFrame(A.raf); A.art?.style.setProperty('--beat', 0) }
 
 function drawViz(t) {
   const c = A.canvas
@@ -1114,12 +1174,15 @@ function drawViz(t) {
   const ctx = c.getContext('2d')
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, w, hgt)
+  if (!A.colors) {
+    const css = getComputedStyle(document.documentElement)
+    A.colors = { accent: css.getPropertyValue('--accent').trim() || '#ff8fab', idle: css.getPropertyValue('--line-2').trim() || '#444' }
+  }
   const bars = 40, gap = 4
   const bw = Math.max(2, (w - gap * (bars - 1)) / bars)
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ff8fab'
-  const idle = getComputedStyle(document.documentElement).getPropertyValue('--line-2').trim() || '#444'
   const playing = A.el && !A.el.paused
   if (playing && A.analyser) A.analyser.getByteFrequencyData(A.data)
+  let bass = 0
   for (let i = 0; i < bars; i++) {
     let v
     if (playing && A.analyser) {
@@ -1128,8 +1191,9 @@ function drawViz(t) {
     } else if (playing) {
       v = 0.25 + 0.2 * Math.sin(t / 260 + i * 0.6) + 0.15 * Math.sin(t / 130 + i * 1.7)
     } else v = 0.06
+    if (i < 6) bass += v / 6
     const bh = Math.max(3, v * hgt)
-    ctx.fillStyle = playing ? accent : idle
+    ctx.fillStyle = playing ? A.colors.accent : A.colors.idle
     ctx.globalAlpha = playing ? 0.35 + 0.65 * v : 1
     const x = i * (bw + gap)
     ctx.beginPath()
@@ -1137,6 +1201,8 @@ function drawViz(t) {
     ctx.fill()
   }
   ctx.globalAlpha = 1
+  // The cover breathes with the low end.
+  if (A.art && !reduceMotion.matches) A.art.style.setProperty('--beat', playing ? Math.max(0, bass - 0.25).toFixed(3) : 0)
 }
 
 /* ---------------------------------------------------------- media controls */
@@ -1234,6 +1300,7 @@ function welcome() {
     h('div', { class: 'row' },
       h('button', { class: 'btn primary lg', type: 'button', onclick: pickSource }, icon('folder'), 'Choose folder', h('kbd', { class: 'key' }, 'L')),
       S.caps.native && h('button', { class: 'btn ghost lg', type: 'button', onclick: () => pickSource(true) }, 'Browse in app'),
+      h('button', { class: 'btn ghost lg', type: 'button', onclick: startTour }, 'Take the tour'),
     ),
     recent.length ? h('div', { class: 'recent' },
       h('p', { class: 'label mono recent-title' }, 'recent folders'),
@@ -1308,7 +1375,7 @@ async function setServerSetting(key, value) {
   } catch (e) { fail(e) }
 }
 
-function optimisticRemove(f) {
+function optimisticRemove(f, target = null, onLand = null) {
   const idx = S.cur
   removeLocal(f)
   S.curPath = null
@@ -1318,7 +1385,7 @@ function optimisticRemove(f) {
   S.curPath = S.view[S.cur]?.p ?? null
   V.dir = 1
   renderTop(); renderCounter()
-  ghostOut()
+  ghostOut(target, onLand)
   V.el = null
   show()
 }
@@ -1338,8 +1405,8 @@ async function moveTo(i) {
   if (!d) { if (S.meta) toast(`No destination on that key yet. Press <b>A</b> to add one, or <b>G</b> to pick from all.`, { key: 'sort' }); return }
   if (!f) return
   if (!d.exists) { toast(`<b>${esc(d.label || d.name)}</b> can't be found. Is the drive connected?`, { kind: 'err' }); return }
-  flashTile(i)
-  optimisticRemove(f)
+  const tile = $(`#deckTiles .tile[data-i="${i}"]`)
+  optimisticRemove(f, tile, () => flashTile(i))
   try {
     const r = await POST('/api/move', { path: f.p, dest: d.path })
     const label = esc(d.label || d.name)
@@ -1359,7 +1426,7 @@ async function undo() {
     if (!goToPath(r.restored)) {
       if (S.byPath.has(r.restored)) { clearFilters(); goToPath(r.restored) }
     }
-    toast(`Restored <b>${esc(r.name)}</b>`, { kind: 'ok', key: 'sort' })
+    toast(r.kind === 'log' ? `Moved <b>${esc(r.name)}</b> back <span class="dim">(from the move log)</span>` : `Restored <b>${esc(r.name)}</b>`, { kind: 'ok', key: 'sort' })
   } catch (e) {
     toast(esc(e.message), { kind: e.status === 409 ? 'info' : 'err' })
   }
@@ -1380,7 +1447,7 @@ async function deleteCurrent() {
     if (!answer) return
     if (answer.checked) setServerSetting('confirm_delete', false)
   }
-  optimisticRemove(f)
+  optimisticRemove(f, $('#deleteBtn'), () => bump($('#deleteBtn')))
   try {
     await POST('/api/delete', { path: f.p })
     toast(`<b>${esc(f.n)}</b> is in the Recycle Bin`, { key: 'sort' })
@@ -1735,6 +1802,9 @@ async function openSettings() {
       settingRow('Filmstrip', 'Thumbnails of every file under the viewer', switchCtl(p.film, v => { p.film = v; savePrefs(); applyLayout() }, 'Filmstrip')),
       settingRow('Details panel', 'Press H to hide panels while sorting', switchCtl(p.chrome === 'full', v => { p.chrome = v ? 'full' : 'min'; savePrefs(); applyLayout() }, 'Details panel')),
     ),
+    h('section', { class: 'set-section' }, h('p', { class: 'label mono' }, 'help'),
+      settingRow('Quick tour', 'The one-minute walkthrough from the first launch', h('button', { class: 'btn', type: 'button', onclick: () => { S.modals.at(-1)?.close(); startTour() } }, 'Start tour')),
+    ),
     h('section', { class: 'set-section' }, h('p', { class: 'label mono' }, 'sorting'),
       settingRow('Include subfolders', 'Destination folders inside the source are skipped', switchCtl(!!st.include_subfolders, v => setServerSetting('include_subfolders', v), 'Include subfolders')),
       settingRow('Ask before deleting', 'Confirm before sending a file to the Recycle Bin', switchCtl(!!st.confirm_delete, v => setServerSetting('confirm_delete', v), 'Ask before deleting')),
@@ -1747,7 +1817,7 @@ async function openSettings() {
       settingRow('Preview cache', null, caps.local ? h('button', { class: 'btn', type: 'button', onclick: async () => { try { const r = await POST('/api/cache/clear'); cacheText.textContent = `${fmtBytes(r.size)} used`; toast('Cache cleared') } catch (e) { fail(e) } } }, 'Clear') : null),
     ),
   ]
-  body[2].lastChild.querySelector('.txt').append(cacheText)
+  body[3].lastChild.querySelector('.txt').append(cacheText)
   modal({
     title: 'settings',
     wide: true,
@@ -1832,6 +1902,138 @@ async function openShare() {
   try { render(await GET('/api/lan')) } catch (e) { fail(e); m.close() }
 }
 
+/* ==================================================================== tour */
+
+// A short guided tour on first launch. Each step spotlights one part of the UI
+// and explains it in a sentence or two; some steps can do the thing right away.
+const TOUR_KEY = 'fs.tour.v2'
+const TOUR = [
+  { hero: true, title: 'Hi! Welcome to Fair Sorting', text: "Here's a one-minute tour so you know where everything is. You can skip it and replay it from Settings any time." },
+  { target: '#sourceBtn', title: '1 · Pick a folder to sort', text: 'Start with the folder full of photos, videos or audio you want to clean up.', keys: ['L'], action: { label: 'Choose folder', run: () => pickSource() } },
+  { target: '#deck', title: '2 · Add where files should go', text: 'These are your destination folders, like Family, Memes or Keep. Each one gets its own number key.', keys: ['A'], action: { label: 'Add folders', run: () => addDestinations() } },
+  { target: '#stage', title: '3 · Look, then press a number', text: 'The current file shows here. Press its number (or click a folder below) and it moves there. The next file appears right away.', keys: ['1', '…', '0'] },
+  { target: '#film', fallback: '#stage', title: '4 · Move around', text: 'Use the arrow keys or click a thumbnail. Search and the photos / videos / audio filters help in big folders.', keys: ['←', '→'] },
+  { target: '#undoBtn', title: '5 · Oops? Undo', text: 'Ctrl+Z puts the last file back where it was. Keep pressing to go further back, even to moves from earlier days.', keys: ['Ctrl', 'Z'] },
+  { target: '#historyBtn', title: '6 · Everything is logged', text: 'History shows what you did this session and the full move log. Any move can be sent back from there.' },
+  { target: '#shareBtn', when: () => S.caps.share, title: '7 · Sort from your phone', text: 'Share on Wi-Fi shows a QR code and a PIN, so you can keep sorting from the couch.' },
+  { hero: true, last: true, title: "You're all set", text: 'Press ? whenever you want the full list of shortcuts. Happy sorting!' },
+]
+const T = { i: 0, steps: [], node: null, hole: null, card: null }
+
+function tourSeen() { try { return !!localStorage.getItem(TOUR_KEY) } catch { return true } }
+function markTourSeen() { try { localStorage.setItem(TOUR_KEY, String(Date.now())) } catch { /* ignore */ } }
+
+function startTour() {
+  if (T.node) return
+  closeMenu()
+  while (S.modals.length) S.modals.at(-1).close(null)
+  closeDrawer()
+  T.steps = TOUR.filter(step => !step.when || step.when())
+  T.i = 0
+  T.hole = h('div', { class: 'tour-hole' })
+  T.card = h('div', { class: 'tour-card', role: 'document' })
+  T.node = h('div', { class: 'tour', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Quick tour' }, T.hole, T.card)
+  document.body.append(T.node)
+  S.tour = true
+  document.addEventListener('keydown', tourKeys, true)
+  addEventListener('resize', placeTour)
+  renderTour()
+}
+
+function endTour() {
+  if (!T.node) return
+  markTourSeen()
+  const node = T.node
+  T.node = null
+  S.tour = false
+  document.removeEventListener('keydown', tourKeys, true)
+  removeEventListener('resize', placeTour)
+  if (reduceMotion.matches) node.remove()
+  else node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 180 }).onfinish = () => node.remove()
+}
+
+function tourGo(delta) {
+  const next = T.i + delta
+  if (next >= T.steps.length) { endTour(); return }
+  T.i = Math.max(0, next)
+  renderTour()
+}
+
+function tourKeys(e) {
+  if (!T.node || T.node.hidden) return
+  e.stopPropagation()
+  if (e.key === 'Escape') { e.preventDefault(); endTour() }
+  else if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); tourGo(1) }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); tourGo(-1) }
+  else if (e.key !== 'Tab') e.preventDefault()
+}
+
+async function tourAction(step) {
+  T.node.hidden = true
+  try { await step.action.run() } catch { /* the action reports its own errors */ }
+  if (!T.node) return
+  T.node.hidden = false
+  tourGo(1)
+}
+
+function renderTour() {
+  const step = T.steps[T.i]
+  const n = T.steps.length
+  const dots = h('div', { class: 'tour-dots', 'aria-hidden': 'true' }, ...T.steps.map((_, k) => h('i', { class: k < T.i ? 'done' : k === T.i ? 'now' : '' })))
+  const next = h('button', { class: 'btn primary', type: 'button', onclick: () => tourGo(1) }, step.last ? 'Start sorting' : T.i === 0 ? "Let's go" : 'Next')
+  T.card.replaceChildren(...[
+    h('div', { class: 'tour-top' }, dots, h('span', { class: 'mono dim' }, `${T.i + 1} / ${n}`)),
+    step.hero ? h('img', { class: 'tour-mascot', src: '/mascot.png', alt: '' }) : null,
+    h('h3', { class: 'tour-title' }, step.title),
+    h('p', { class: 'tour-text' }, step.text),
+    step.keys ? h('div', { class: 'tour-keys' }, h('span', { class: 'mono dim' }, 'shortcut'), ...step.keys.map(k => (k === '…' ? h('span', { class: 'dim' }, '–') : h('kbd', { class: 'key' }, k)))) : null,
+    h('div', { class: 'tour-actions' },
+      T.i > 0 && !step.last ? h('button', { class: 'btn ghost', type: 'button', onclick: () => tourGo(-1) }, 'Back') : null,
+      !step.last ? h('button', { class: 'btn ghost tour-skip', type: 'button', onclick: endTour }, 'Skip tour') : null,
+      step.action ? h('button', { class: 'btn', type: 'button', onclick: () => tourAction(step) }, step.action.label) : null,
+      next,
+    ),
+  ].filter(Boolean))
+  if (!reduceMotion.matches) T.card.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'cubic-bezier(.22,1,.36,1)' })
+  placeTour()
+  requestAnimationFrame(() => next.focus({ preventScroll: true }))
+}
+
+function placeTour() {
+  if (!T.node) return
+  const step = T.steps[T.i]
+  const visible = el => el && el.offsetParent !== null && el.getBoundingClientRect().width > 0
+  let target = step.target ? $(step.target) : null
+  if (!visible(target)) target = step.fallback ? $(step.fallback) : null
+  const pad = 8
+  const card = T.card
+  const cw = card.offsetWidth, ch = card.offsetHeight
+  let left, top
+  if (visible(target)) {
+    const r = target.getBoundingClientRect()
+    const hole = { left: r.left - pad, top: r.top - pad, width: r.width + pad * 2, height: r.height + pad * 2 }
+    Object.assign(T.hole.style, { left: `${hole.left}px`, top: `${hole.top}px`, width: `${hole.width}px`, height: `${hole.height}px` })
+    T.node.classList.remove('no-target')
+    const below = hole.top + hole.height + 14
+    const above = hole.top - 14 - ch
+    left = hole.left + hole.width / 2 - cw / 2
+    if (below + ch < innerHeight - 12) top = below
+    else if (above > 12) top = above
+    else {
+      // Big targets (the viewer): sit inside, near the bottom-left corner.
+      left = hole.left + 24
+      top = hole.top + hole.height - ch - 24
+    }
+  } else {
+    Object.assign(T.hole.style, { left: `${innerWidth / 2}px`, top: `${innerHeight / 2}px`, width: '0px', height: '0px' })
+    T.node.classList.add('no-target')
+    left = innerWidth / 2 - cw / 2
+    top = innerHeight / 2 - ch / 2
+  }
+  card.style.left = `${Math.round(Math.max(12, Math.min(innerWidth - cw - 12, left)))}px`
+  card.style.top = `${Math.round(Math.max(12, Math.min(innerHeight - ch - 12, top)))}px`
+}
+
 /* ================================================================== drawer */
 
 const D = { tab: 'session', log: null, open: null, q: '' }
@@ -1852,7 +2054,7 @@ async function renderDrawer(fetchLog = true) {
     const undo = S.meta?.undo || { count: 0 }
     body.replaceChildren(
       h('div', { class: 'drawer-tools' }, h('div', { class: 'row' },
-        h('button', { class: 'btn', type: 'button', disabled: !undo.count, onclick: undo_ }, icon('undo'), undo.count ? `Undo ${undo.label}` : 'Nothing to undo'))),
+        h('button', { class: 'btn', type: 'button', disabled: !(undo.count || undo.log), onclick: undo_ }, icon('undo'), undo.label ? `Undo: ${undo.label}` : 'Nothing to undo'))),
       items.length ? h('div', { class: 'hist' }, ...items.map(histRow)) : h('div', { class: 'drawer-empty' }, h('b', {}, 'nothing yet'), 'Moves, renames and deletes from this session show up here.'),
     )
     return
@@ -1997,7 +2199,7 @@ function handleEscape(e) {
 }
 
 function onKey(e) {
-  if (!S.started) return
+  if (!S.started || S.tour) return
   if (e.key === 'Escape') { handleEscape(e); return }
   if (S.modals.length || S.menu) return
   const t = e.target
@@ -2207,6 +2409,7 @@ async function start() {
   applyLayout()
   wire()
   await loadState()
+  if (!tourSeen()) setTimeout(startTour, 700)
   if (S.caps.share) GET('/api/lan').then(st => { S.lan = st; renderTop() }).catch(() => {})
 }
 

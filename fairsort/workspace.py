@@ -565,7 +565,14 @@ class Workspace:
                     self.stats["renamed"] = max(0, self.stats["renamed"] - 1)
                     self._mark_history_undone("rename", action["dst"])
                     return {"restored": action["src"], "name": os.path.basename(action["src"]), "kind": "rename"}
-            raise OpError("Nothing to undo.", 409)
+            # This session's history is used up: keep going back through the move
+            # log, newest first, so undo also reaches moves from earlier sessions.
+            records = self._records()
+            for index in range(len(records) - 1, -1, -1):
+                src, dst = records[index]
+                if os.path.exists(dst):
+                    return {**self.undo_log(index, dst), "kind": "log"}
+            raise OpError("Nothing left to undo. The move log is empty too.", 409)
 
     def undo_log(self, index: int, destination: str) -> dict:
         with self.lock:
@@ -760,6 +767,13 @@ class Workspace:
                 }
             )
         last = self.undo_stack[-1] if self.undo_stack else None
+        records = self._records()
+        if last:
+            undo_label = f"{last['type']} {os.path.basename(last['src'])}"
+        elif records:
+            undo_label = f"move {os.path.basename(records[-1][0])} back (move log)"
+        else:
+            undo_label = ""
         return {
             "rev": self.rev,
             "source": self.source,
@@ -769,7 +783,8 @@ class Workspace:
             "logfile": self.logfile,
             "undo": {
                 "count": len(self.undo_stack),
-                "label": f"{last['type']} {os.path.basename(last['src'])}" if last else "",
+                "log": len(records),
+                "label": undo_label,
             },
             "stats": {key: value for key, value in self.stats.items() if key != "per_dest"},
             "history": list(self.history)[:80],

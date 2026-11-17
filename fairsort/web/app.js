@@ -90,8 +90,13 @@ const baseName = path => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || pat
 /* ================================================================ constants */
 
 const WEB_IMAGE = new Set(['jpg', 'jpeg', 'jfif', 'png', 'gif', 'bmp', 'webp', 'avif', 'ico'])
-const WEB_VIDEO = new Set(['mp4', 'm4v', 'mov', 'webm', 'ogv', 'mkv'])
-const WEB_AUDIO = new Set(['mp3', 'wav', 'm4a', 'ogg', 'aac', 'opus', 'flac'])
+const WEB_VIDEO = new Set(['mp4', 'm4v', 'mov', 'qt', 'webm', 'ogv', 'mkv', 'insv', '360'])
+const WEB_AUDIO = new Set(['mp3', 'wav', 'bwf', 'm4a', 'm4b', 'ogg', 'oga', 'aac', 'opus', 'flac', 'weba'])
+// Cinema RAW FFmpeg can't decode: sortable, but there's nothing to show.
+const NO_PREVIEW = new Set(['braw', 'r3d', 'crm'])
+const RAW_EXT = new Set('raw cr2 cr3 crw nef nrw arw srf sr2 raf rw2 rwl orf ori pef srw dng 3fr fff iiq cap eip mef mos erf mrw x3f kdc dcr k25 gpr'.split(' '))
+const hasRaw = f => !!f.x?.some(n => RAW_EXT.has(extOf(n)))
+const plus = n => (n ? ` <span class="dim">+${n}</span>` : '')
 const ZOOM_LADDER = [20, 25, 33, 50, 67, 80, 100, 125, 150, 200, 300, 400, 600, 800]
 const ZOOM_MIN = 20, ZOOM_MAX = 800
 const KIND_ICON = { image: 'image', video: 'video', audio: 'audio' }
@@ -433,6 +438,7 @@ function metaRows(f, info) {
   const rows = []
   const add = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push([k, v]) }
   add('size', fmtBytes(info?.size ?? f.s))
+  if (f.x?.length) add('with', f.x.join('  ·  '))
   if (info?.width && info?.height) {
     const mp = (info.width * info.height) / 1e6
     add('pixels', `${info.width} × ${info.height}${f.k === 'image' && mp >= 1 ? `  ·  ${mp.toFixed(1)} MP` : ''}`)
@@ -441,6 +447,8 @@ function metaRows(f, info) {
   if (info?.fps) add('frames', `${Math.round(info.fps * 100) / 100} fps`)
   if (info?.frames) add('frames', `${info.frames} (animated)`)
   if (f.k === 'video' && (info?.vcodec || info?.acodec)) add('codec', [info.vcodec, info.acodec].filter(Boolean).join(' / '))
+  if (f.k === 'video' && info?.pix_fmt) add('sampling', fmtPix(info.pix_fmt))
+  if (info?.embedded) add('preview', `${info.embedded} from the RAW`)
   if (f.k === 'audio' && info?.acodec) add('codec', [info.acodec, info.rate ? `${(info.rate / 1000).toFixed(1)} kHz` : '', info.channels ? `${info.channels} ch` : ''].filter(Boolean).join(' · '))
   if (info?.bitrate && f.k !== 'image') add('bitrate', `${Math.round(info.bitrate / 1000)} kbps`)
   if (info?.tags?.artist) add('artist', info.tags.artist)
@@ -451,6 +459,13 @@ function metaRows(f, info) {
   if (exposure) add('exposure', exposure)
   add('modified', fmtDate(f.m))
   return rows
+}
+
+// yuv422p10le -> 4:2:2 · 10-bit: what videographers actually call it.
+function fmtPix(p) {
+  const sub = /444/.test(p) ? '4:4:4' : /422/.test(p) ? '4:2:2' : /420|nv12|p010/.test(p) ? '4:2:0' : ''
+  const bits = (p.match(/p(\d\d)(le|be)?$/) || [])[1] || (/p010/.test(p) ? '10' : '8')
+  return sub ? `${sub} · ${bits}-bit` : p
 }
 
 function renderInspector(f) {
@@ -465,7 +480,8 @@ function renderInspector(f) {
     actions.forEach(b => { b.disabled = true })
     return
   }
-  kindEl.textContent = `${f.k} · ${extOf(f.n) || 'file'}`
+  const exts = [...new Set((f.x || []).map(extOf))]
+  kindEl.textContent = `${f.k} · ${[extOf(f.n) || 'file', ...exts].join(' + ')}`
   nameEl.textContent = f.n
   folderEl.textContent = f.f ? `in ${f.f}/` : ''
   actions.forEach(b => { b.disabled = false })
@@ -497,7 +513,8 @@ const fetchInfo = debounce(async f => {
 const PLAYABLE_VIDEO = new Set(['h264', 'vp8', 'vp9', 'av1', 'theora', 'hevc'])
 const PLAYABLE_AUDIO = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac'])
 function checkCodecs(f, info) {
-  if (!info || V.file !== f || V.converted || !S.caps.ffmpeg || f.k === 'image') return
+  if (!info || V.file !== f || V.converted || !S.caps.ffmpeg || f.k === 'image' || info.preview === false) return
+  if (info.convert) { convert(f, V.token); return }
   const badAudio = info.acodec && !PLAYABLE_AUDIO.has(info.acodec) && !info.acodec.startsWith('pcm_')
   const badVideo = f.k === 'video' && info.vcodec && !PLAYABLE_VIDEO.has(info.vcodec)
   if (badAudio || badVideo) convert(f, V.token)
@@ -537,6 +554,7 @@ function renderFilm(center = false) {
       if (f.k === 'audio') img.onload = () => node.append(icon('audio', 'tag'))
       node.append(img)
       if (f.k === 'video') node.append(icon('play', 'tag'))
+      if (hasRaw(f)) node.append(h('span', { class: 'raw-tag' }, 'RAW'))
       node.addEventListener('click', () => { const idx = S.view.indexOf(f); if (idx >= 0) go(idx, Math.sign(idx - S.cur)) })
       filmNodes.set(f.p, node)
       track.append(node)
@@ -1007,6 +1025,15 @@ function maybeAutoplay(m, token) {
 }
 
 function loadVideo(f, token, wrap) {
+  if (NO_PREVIEW.has(extOf(f.n))) {
+    $('#controls').hidden = true
+    setState(stateBox({
+      title: `No preview for ${extOf(f.n).toUpperCase()}`,
+      text: "This cinema RAW format can't be decoded here, but sorting works as usual. Open it in DaVinci Resolve or the camera maker's player to look closer.",
+      actions: openActions(),
+    }))
+    return
+  }
   const v = document.createElement('video')
   v.className = 'media-el'
   v.playsInline = true
@@ -1371,7 +1398,7 @@ async function setServerSetting(key, value) {
   try {
     const r = await POST('/api/settings', { [key]: value })
     S.settings = r.settings
-    if (key === 'include_subfolders') await sync()
+    if (key === 'include_subfolders' || key === 'keep_together') await sync()
   } catch (e) { fail(e) }
 }
 
@@ -1410,7 +1437,7 @@ async function moveTo(i) {
   try {
     const r = await POST('/api/move', { path: f.p, dest: d.path })
     const label = esc(d.label || d.name)
-    toast(`Moved <b>${esc(f.n)}</b> → ${label}${r.renamed ? ` as <b>${esc(baseName(r.to))}</b>` : ''}`, { key: 'sort', action: { label: 'Undo', run: undo } })
+    toast(`Moved <b>${esc(f.n)}</b>${plus(r.extras)} → ${label}${r.renamed ? ` as <b>${esc(baseName(r.to))}</b>` : ''}`, { key: 'sort', action: { label: 'Undo', run: undo } })
     if (r.warning) toast(esc(r.warning), { kind: 'err' })
   } catch (e) {
     restoreLocal(f)
@@ -1426,7 +1453,7 @@ async function undo() {
     if (!goToPath(r.restored)) {
       if (S.byPath.has(r.restored)) { clearFilters(); goToPath(r.restored) }
     }
-    toast(r.kind === 'log' ? `Moved <b>${esc(r.name)}</b> back <span class="dim">(from the move log)</span>` : `Restored <b>${esc(r.name)}</b>`, { kind: 'ok', key: 'sort' })
+    toast(r.kind === 'log' ? `Moved <b>${esc(r.name)}</b>${plus(r.extras)} back <span class="dim">(from the move log)</span>` : `Restored <b>${esc(r.name)}</b>${plus(r.extras)}`, { kind: 'ok', key: 'sort' })
   } catch (e) {
     toast(esc(e.message), { kind: e.status === 409 ? 'info' : 'err' })
   }
@@ -1439,7 +1466,7 @@ async function deleteCurrent() {
     const answer = await confirm_({
       title: 'recycle bin',
       heading: 'Move to Recycle Bin?',
-      text: `"${f.n}" goes to the Recycle Bin on ${S.caps.local ? 'this computer' : 'the computer running Fair Sorting'}. You can restore it from there; Fair Sorting can't undo this.`,
+      text: `"${f.n}"${f.x?.length ? ` and ${f.x.length === 1 ? f.x[0] : `its ${f.x.length} companion files`}` : ''} go${f.x?.length ? '' : 'es'} to the Recycle Bin on ${S.caps.local ? 'this computer' : 'the computer running Fair Sorting'}. You can restore ${f.x?.length ? 'them' : 'it'} from there; Fair Sorting can't undo this.`,
       ok: 'Move to Recycle Bin',
       danger: true,
       check: "Don't ask again",
@@ -1449,8 +1476,9 @@ async function deleteCurrent() {
   }
   optimisticRemove(f, $('#deleteBtn'), () => bump($('#deleteBtn')))
   try {
-    await POST('/api/delete', { path: f.p })
-    toast(`<b>${esc(f.n)}</b> is in the Recycle Bin`, { key: 'sort' })
+    const r = await POST('/api/delete', { path: f.p })
+    toast(`<b>${esc(f.n)}</b>${plus(r.extras)} ${r.extras ? 'are' : 'is'} in the Recycle Bin`, { key: 'sort' })
+    if (r.warning) toast(esc(r.warning), { kind: 'err' })
   } catch (e) {
     restoreLocal(f)
     fail(e)
@@ -1802,11 +1830,16 @@ async function openSettings() {
       settingRow('Filmstrip', 'Thumbnails of every file under the viewer', switchCtl(p.film, v => { p.film = v; savePrefs(); applyLayout() }, 'Filmstrip')),
       settingRow('Details panel', 'Press H to hide panels while sorting', switchCtl(p.chrome === 'full', v => { p.chrome = v ? 'full' : 'min'; savePrefs(); applyLayout() }, 'Details panel')),
     ),
+    h('section', { class: 'set-section' }, h('p', { class: 'label mono' }, 'updates'),
+      settingRow(`Version ${S.boot?.version || ''}`, U.info?.newer ? `Version ${U.info.latest} is available` : 'Fair Sorting checks GitHub for new releases', h('button', { class: `btn${U.info?.newer ? ' primary' : ''}`, type: 'button', onclick: () => { S.modals.at(-1)?.close(); U.info?.newer ? openUpdate() : checkUpdates(true) } }, U.info?.newer ? 'See update' : 'Check now')),
+      settingRow('Check for updates automatically', 'A quick look at GitHub when the app starts', switchCtl(S.settings.check_updates !== false, v => setServerSetting('check_updates', v), 'Check for updates')),
+    ),
     h('section', { class: 'set-section' }, h('p', { class: 'label mono' }, 'help'),
       settingRow('Quick tour', 'The one-minute walkthrough from the first launch', h('button', { class: 'btn', type: 'button', onclick: () => { S.modals.at(-1)?.close(); startTour() } }, 'Start tour')),
     ),
     h('section', { class: 'set-section' }, h('p', { class: 'label mono' }, 'sorting'),
       settingRow('Include subfolders', 'Destination folders inside the source are skipped', switchCtl(!!st.include_subfolders, v => setServerSetting('include_subfolders', v), 'Include subfolders')),
+      settingRow('Keep RAW+JPEG and sidecars together', 'One item per shot. The RAW, .xmp, .thm, .srt, .lrv and Sony XML files move, rename and bin with it', switchCtl(st.keep_together !== false, v => setServerSetting('keep_together', v), 'Keep files together')),
       settingRow('Ask before deleting', 'Confirm before sending a file to the Recycle Bin', switchCtl(!!st.confirm_delete, v => setServerSetting('confirm_delete', v), 'Ask before deleting')),
       settingRow('Autoplay', 'Start videos and audio when you land on them', switchCtl(!!st.autoplay, v => setServerSetting('autoplay', v), 'Autoplay')),
       settingRow('Always convert video & audio', 'Use when files play without picture or sound. Slower to start.', switchCtl(!!st.always_convert, v => { setServerSetting('always_convert', v); V.file = null; setTimeout(show, 100) }, 'Always convert')),
@@ -1817,7 +1850,7 @@ async function openSettings() {
       settingRow('Preview cache', null, caps.local ? h('button', { class: 'btn', type: 'button', onclick: async () => { try { const r = await POST('/api/cache/clear'); cacheText.textContent = `${fmtBytes(r.size)} used`; toast('Cache cleared') } catch (e) { fail(e) } } }, 'Clear') : null),
     ),
   ]
-  body[3].lastChild.querySelector('.txt').append(cacheText)
+  body[4].lastChild.querySelector('.txt').append(cacheText)
   modal({
     title: 'settings',
     wide: true,
@@ -1900,6 +1933,112 @@ async function openShare() {
     )
   }
   try { render(await GET('/api/lan')) } catch (e) { fail(e); m.close() }
+}
+
+/* ================================================================== updates */
+
+// Checks GitHub for a newer release (desktop only), shows what's new and
+// installs it in place: Setup for installed/folder copies, an exe swap for the
+// single file. Settings and move logs are never touched.
+const U = { info: null, polling: false }
+
+async function checkUpdates(manual = false) {
+  if (!S.caps.local) return
+  let info
+  try { info = await GET('/api/update', manual ? { force: '1' } : null) } catch (e) { if (manual) fail(e); return }
+  if (info.remote) return
+  U.info = info
+  $('#settingsBtn').classList.toggle('has-update', !!info.newer)
+  if (info.error && manual) { toast(esc(info.error), { kind: 'err' }); return }
+  if (info.newer) {
+    toast(`Fair Sorting <b>${esc(info.latest)}</b> is out`, { key: 'update', timeout: 12000, action: { label: "What's new", run: openUpdate } })
+  } else if (manual) {
+    toast(`You're up to date <span class="dim">(v${esc(info.current)})</span>`, { kind: 'ok', key: 'update' })
+  }
+}
+
+// Release notes are Markdown; render a safe subset with DOM nodes only.
+function renderNotes(text) {
+  const box = h('div', { class: 'notes' })
+  let list = null, fenced = false, skip = false
+  const inline = line => line.replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trimEnd()
+    if (line.startsWith('```')) { fenced = !fenced; continue }
+    if (!fenced && /^#{1,6}\s/.test(line)) skip = /checksum|sha-?256/i.test(line)  // for the updater, not for people
+    if (skip || fenced || line.startsWith('|') || !line.trim()) { list = null; continue }
+    if (/^#{1,6}\s/.test(line)) { list = null; box.append(h('h4', { class: 'label mono' }, inline(line.replace(/^#+\s*/, '')))); continue }
+    if (/^\s*[-*]\s/.test(line)) {
+      if (!list) { list = h('ul'); box.append(list) }
+      list.append(h('li', {}, inline(line.replace(/^\s*[-*]\s/, ''))))
+      continue
+    }
+    list = null
+    box.append(h('p', {}, inline(line)))
+  }
+  return box
+}
+
+async function openUpdate() {
+  if (!U.info) await checkUpdates(true)
+  const info = U.info
+  if (!info) return
+  const progress = h('div', { class: 'blocks' }, h('i', { style: { '--p': info.download?.progress || 0 } }))
+  const status = h('p', { class: 'mono dim', style: { fontSize: '12px' } }, '')
+  const action = h('button', { class: 'btn primary', type: 'button' })
+  const meter = h('div', { style: { display: 'grid', gap: '8px' } }, progress, status)
+  meter.hidden = true
+  const kindText = { installed: 'Your installed copy updates in place and reopens.', folder: 'This app folder is updated in place and reopens.', single: 'This exe is swapped for the new one and reopens.', source: "You're running from source: pull the new code or grab the release." }[info.kind] || ''
+  const m = modal({
+    title: 'update',
+    wide: true,
+    body: [
+      h('h2', {}, info.newer ? `Fair Sorting ${info.latest} is ready` : `You're on the latest version`),
+      h('p', {}, info.newer ? `You have ${info.current}. ${kindText} Settings, destinations and move logs stay as they are.` : `Version ${info.current}. Nothing to install right now.`),
+      info.notes ? renderNotes(info.notes) : null,
+      meter,
+    ],
+    foot: [
+      h('div', { class: 'left mono' }, info.size ? `${fmtBytes(info.size)} download` : ''),
+      h('button', { class: 'btn ghost', type: 'button', onclick: () => POST('/api/open-url', { url: info.page }).catch(fail) }, 'Release page'),
+      action,
+    ],
+  })
+  const setAction = (label, run, disabled = false) => { action.textContent = label; action.onclick = run; action.disabled = disabled; action.hidden = !label }
+  const poll = async () => {
+    if (U.polling) return
+    U.polling = true
+    try {
+      for (;;) {
+        const st = await GET('/api/update/status')
+        meter.hidden = false
+        progress.firstChild.style.setProperty('--p', st.progress || 0)
+        if (st.status === 'downloading') { status.textContent = `downloading… ${Math.round((st.progress || 0) * 100)}%`; setAction('Downloading…', null, true) }
+        else if (st.status === 'ready') {
+          status.textContent = st.verified ? 'downloaded · checksum verified' : 'downloaded'
+          setAction('Restart & update', applyUpdate)
+          break
+        } else if (st.status === 'error') { status.textContent = st.error; setAction('Try again', startDownload); break }
+        else break
+        await sleep(400)
+      }
+    } catch (e) { fail(e) } finally { U.polling = false }
+  }
+  const startDownload = async () => {
+    try { await POST('/api/update/download'); poll() } catch (e) { fail(e) }
+  }
+  const applyUpdate = async () => {
+    setAction('Restarting…', null, true)
+    try {
+      await POST('/api/update/apply')
+      toast('Updating… Fair Sorting will reopen in a moment.', { timeout: 10000 })
+    } catch (e) { fail(e); setAction('Restart & update', applyUpdate) }
+  }
+  if (!info.newer) setAction('Check again', async () => { m.close(); await checkUpdates(true); if (U.info?.newer) openUpdate() })
+  else if (!info.can_apply) setAction('')
+  else if (info.download?.status === 'ready') { meter.hidden = false; status.textContent = 'downloaded'; setAction('Restart & update', applyUpdate) }
+  else if (info.download?.status === 'downloading') poll()
+  else setAction('Download & install', startDownload)
 }
 
 /* ==================================================================== tour */
@@ -2074,7 +2213,7 @@ function histRow(item) {
   const sub = item.type === 'move' ? h('span', {}, '→ ', h('span', { class: 'to' }, item.dest)) : item.type === 'delete' ? 'recycle bin' : `renamed from ${baseName(item.src)}`
   return h('div', { class: `hist-item${item.undone ? ' undone' : ''}` },
     h('span', { class: 'hist-ico' }, icon(iconName, 'ic sm')),
-    h('span', { class: 'hist-main' }, h('span', { class: 'hist-name', title: item.name }, item.name), h('span', { class: 'hist-sub' }, item.undone ? 'undone' : sub)),
+    h('span', { class: 'hist-main' }, h('span', { class: 'hist-name', title: item.name }, item.extras ? `${item.name} +${item.extras}` : item.name), h('span', { class: 'hist-sub' }, item.undone ? 'undone' : sub)),
     h('span', { class: 'hist-meta' }, ago(item.time)),
   )
 }
@@ -2415,6 +2554,7 @@ async function start() {
   wire()
   await loadState()
   if (!tourSeen()) setTimeout(startTour, 700)
+  if (S.caps.local && S.settings.check_updates !== false) setTimeout(() => checkUpdates(false), 4000)
   if (S.caps.share) GET('/api/lan').then(st => { S.lan = st; renderTop() }).catch(() => {})
 }
 

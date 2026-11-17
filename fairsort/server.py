@@ -30,8 +30,8 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import APP_NAME, __version__, media, winshell
-from .env import FROZEN, ICON_FILE, IS_WINDOWS, WEB_DIR, norm_key
+from . import APP_NAME, __version__, media, updater, winshell
+from .env import FROZEN, ICON_FILE, IS_WINDOWS, WEB_DIR, norm_key, open_shared
 from .workspace import OpError, Settings, Workspace
 
 STATIC_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -70,12 +70,15 @@ class App:
         self.workspace = Workspace(self.settings)
         self.converter = media.Converter()
         self.installer = media.FFmpegInstaller()
+        self.updater = updater.Updater()
         self.local_token = secrets.token_urlsafe(24)
         self.window = None  # pywebview window in desktop mode
         self.on_theme = None  # callback that recolors the native title bar
         self.main_port = 0
         self.last_ping = time.monotonic()
         self.lan = LanShare(self)
+        # Before a file is moved/renamed/deleted, stop our own helpers reading it.
+        self.workspace.release = self.release_file
         self._failures: dict[str, list[float]] = {}
         self._failures_lock = threading.Lock()
         threading.Thread(target=self._warmup, name="fs-warmup", daemon=True).start()
@@ -111,6 +114,21 @@ class App:
 
     def regenerate_pin(self):
         self.settings.update(lan_pin=f"{secrets.randbelow(10**6):06d}", lan_secret=secrets.token_hex(16))
+
+    def quit(self):
+        """Close the app (used right after an updater has been started)."""
+        if self.window is not None:
+            try:
+                self.window.destroy()
+                return
+            except Exception:
+                pass
+        self.shutdown()
+        os._exit(0)
+
+    def release_file(self, path: str):
+        self.converter.cancel(path)
+        media.release(path)
 
     # --------------------------------------------------------------- window
 
@@ -462,7 +480,7 @@ class Handler(BaseHTTPRequestHandler):
         self._begin(status, headers)
         if head or getattr(self, "head_only", False) or length == 0:
             return
-        with open(path, "rb") as handle:
+        with open_shared(path) as handle:
             handle.seek(start)
             remaining = length
             while remaining > 0:
@@ -610,11 +628,17 @@ def api_recent_forget(req: Handler):
 def api_settings(req: Handler):
     app = req.app
     changes = {}
-    for key in ("confirm_delete", "autoplay", "always_convert"):
+    for key in ("confirm_delete", "autoplay", "always_convert", "check_updates"):
         if key in req.body:
             changes[key] = bool(req.body[key])
     if changes:
         app.settings.update(**changes)
+    if "keep_together" in req.body:
+        together = bool(req.body["keep_together"])
+        if together != bool(app.settings.get("keep_together", True)):
+            app.settings.update(keep_together=together)
+            if app.workspace.source:
+                app.workspace.rescan()
     if "include_subfolders" in req.body:
         recursive = bool(req.body["include_subfolders"])
         app.settings.update(include_subfolders=recursive)
@@ -875,6 +899,16 @@ def api_open(req: Handler):
         raise ApiError(500, f"Couldn't open it: {exc.strerror or exc}") from exc
 
 
+@route("POST", "/api/open-url", local=True)
+def api_open_url(req: Handler):
+    url = str(req.arg("url", required=True))
+    if not re.match(r"^https://github\.com/ripaaf/fair-sorting(/|$)", url):
+        raise ApiError(400, "Only Fair Sorting's GitHub pages can be opened from here.")
+    import webbrowser
+
+    webbrowser.open(url)
+
+
 @route("POST", "/api/reveal", local=True)
 def api_reveal(req: Handler):
     path = str(req.arg("path", required=True))
@@ -927,6 +961,36 @@ def api_window_theme(req: Handler):
     theme = "light" if req.arg("theme") == "light" else "dark"
     if req.app.on_theme and req.app.window is not None:
         threading.Thread(target=req.app.on_theme, args=(theme,), daemon=True).start()
+
+
+@route("GET", "/api/update")
+def api_update(req: Handler):
+    if not req.is_local:
+        return {"remote": True}
+    return req.app.updater.check(force=req.query.get("force") == "1")
+
+
+@route("GET", "/api/update/status", local=True)
+def api_update_status(req: Handler):
+    return dict(req.app.updater.state)
+
+
+@route("POST", "/api/update/download", local=True)
+def api_update_download(req: Handler):
+    try:
+        return req.app.updater.start_download()
+    except RuntimeError as exc:
+        raise ApiError(409, str(exc)) from exc
+
+
+@route("POST", "/api/update/apply", local=True)
+def api_update_apply(req: Handler):
+    try:
+        kind = req.app.updater.apply()
+    except (RuntimeError, OSError) as exc:
+        raise ApiError(409, str(exc)) from exc
+    threading.Timer(0.8, req.app.quit).start()
+    return {"kind": kind}
 
 
 @route("GET", "/api/cache")

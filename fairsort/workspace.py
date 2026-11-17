@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .env import LEGACY_CONFIG_FILE, OUTPUT_DIR, SETTINGS_FILE, is_within, norm_key
-from .media import KIND_BY_EXT
+from .media import KIND_BY_EXT, RAW_EXTS
 
 LOG_PATTERN = re.compile(r"^move_log.*\.txt$", re.IGNORECASE)
 SKIP_DIRS = {"$recycle.bin", "system volume information", "__pycache__", "node_modules", ".git"}
@@ -42,15 +42,223 @@ def natural_key(text: str) -> tuple:
     return tuple(int(part) if part.isdigit() else part for part in _NUM.split(text.casefold()))
 
 
+# Windows error codes that mean "someone still has the file open".
+_IN_USE = {5, 32, 33}  # ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+_CROSS_DEVICE = {17}  # ERROR_NOT_SAME_DEVICE
+IN_USE_MESSAGE = (
+    "{name} is still open in another program (a player, editor, sync or antivirus), "
+    "so Windows won't let it move. Close it and press the key again."
+)
+
+
+def _in_use(exc: OSError) -> bool:
+    return getattr(exc, "winerror", None) in _IN_USE or isinstance(exc, PermissionError)
+
+
+def _cross_device(exc: OSError) -> bool:
+    import errno
+
+    return getattr(exc, "winerror", None) in _CROSS_DEVICE or exc.errno == errno.EXDEV
+
+
+def _retry(action, path: str, release=None, seconds: float = 4.0):
+    """Run a file operation, stopping our own readers and retrying while the file is busy."""
+    if release:
+        try:
+            release(path)
+        except Exception:
+            pass
+    deadline = time.monotonic() + seconds
+    delay = 0.08
+    while True:
+        try:
+            return action()
+        except OSError as exc:
+            if not _in_use(exc) or time.monotonic() >= deadline:
+                raise
+        time.sleep(delay)
+        delay = min(delay * 1.6, 0.5)
+
+
+def safe_move(src: str, dst: str, release=None):
+    """Move a file without ever leaving a half-done copy behind.
+
+    Same drive: a rename, retried for a few seconds if something still holds the
+    file. Another drive: copy to a temporary name, swap it in, then remove the
+    original; if the original can't be removed the copy is deleted again.
+    (shutil.move falls back to copying on *any* rename error and then leaves
+    that copy behind when deleting the source fails, which is exactly what
+    produced name_1/name_2 duplicates on busy files.)
+    """
+    try:
+        _retry(lambda: os.rename(src, dst), src, release)
+        return
+    except OSError as exc:
+        if not _cross_device(exc):
+            if _in_use(exc):
+                raise OpError(IN_USE_MESSAGE.format(name=os.path.basename(src)), 409) from exc
+            raise OpError(f"Move failed: {exc.strerror or exc}") from exc
+    temp = f"{dst}.fs-partial"
+    try:
+        shutil.copy2(src, temp)
+        os.replace(temp, dst)
+    except OSError as exc:
+        for leftover in (temp, dst):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
+        raise OpError(f"Copying to the other drive failed: {exc.strerror or exc}") from exc
+    try:
+        _retry(lambda: os.remove(src), src, release)
+    except OSError as exc:
+        try:
+            os.remove(dst)  # roll back: the original stays where it was
+        except OSError:
+            pass
+        if _in_use(exc):
+            raise OpError(IN_USE_MESSAGE.format(name=os.path.basename(src)), 409) from exc
+        raise OpError(f"Move failed: {exc.strerror or exc}") from exc
+
+
 def unique_path(folder: str, filename: str) -> str:
     """Never overwrite: name.ext, name_1.ext, name_2.ext ... (same scheme as v1)."""
-    base, ext = os.path.splitext(filename)
-    candidate = os.path.join(folder, filename)
-    counter = 1
-    while os.path.exists(candidate):
-        candidate = os.path.join(folder, f"{base}_{counter}{ext}")
+    return group_targets(folder, [filename])[0]
+
+
+# ------------------------------------------------------------------- companions
+#
+# Pro cameras write several files per shot: RAW+JPEG pairs, Lightroom/darktable
+# .xmp edits, .THM thumbnails, drone .SRT telemetry, .LRF/.LRV proxies, Apple
+# .AAE edits, Sony's C0001M01.XML clip metadata. With "keep together" on they
+# ride along with the file you look at: one item in the list, one key press,
+# and move/rename/delete/undo apply to the whole set.
+
+SIDECAR_EXTS = frozenset(".xmp .thm .srt .lrf .lrv .aae .pp3 .dop .on1 .dr4 .vrd .xml".split())
+_IMAGE_SIDECARS = frozenset(".xmp .aae .pp3 .dop .on1 .dr4 .vrd".split())
+_GOPRO = re.compile(r"^g[hxl](\d{6})(_\d+)?$")  # GX010123.MP4 <-> GL010123.LRV
+_SONY_XML = re.compile(r"^(.+)m\d\d$")  # C0001.MP4 <-> C0001M01.XML
+_PRIMARY_ORDER = (".jpg", ".jpeg", ".jpe", ".heic", ".heif", ".hif", ".tif", ".tiff", ".png", ".webp", ".avif")
+
+
+def _ext(name: str) -> str:
+    return os.path.splitext(name)[1].lower()
+
+
+def _stem_key(stem: str) -> str:
+    match = _GOPRO.match(stem)
+    return f"gopro:{match.group(1)}{match.group(2) or ''}" if match else stem
+
+
+def group_key(name: str) -> str | None:
+    """Files with the same key in one folder belong to one shot. None: never grouped."""
+    stem, ext = os.path.splitext(name.lower())
+    if ext in KIND_BY_EXT:
+        return _stem_key(stem)
+    if ext not in SIDECAR_EXTS:
+        return None
+    inner, inner_ext = os.path.splitext(stem)
+    if inner_ext in KIND_BY_EXT:  # darktable / RawTherapee style: IMG_0001.CR3.xmp
+        stem = inner
+    if ext == ".xml":
+        match = _SONY_XML.match(stem)
+        if not match:
+            return None  # some other XML: not ours to move
+        stem = match.group(1)
+    return _stem_key(stem)
+
+
+def is_sidecar(name: str) -> bool:
+    return _ext(name) in SIDECAR_EXTS and group_key(name) is not None
+
+
+def _sidecar_owner(members: list, name: str):
+    inner = os.path.splitext(name.lower())[0]
+    for entry in members:
+        if entry.name.lower() == inner or any(os.path.basename(x).lower() == inner for x in entry.extras):
+            return entry
+    want_image = _ext(name) in _IMAGE_SIDECARS
+    for entry in members:
+        if (entry.kind == "image") == want_image:
+            return entry
+    return members[0]
+
+
+def group_entries(entries: list, sidecars: list[str]) -> list:
+    """Fold RAW partners and sidecar files into the entry people will look at."""
+    groups: dict[tuple[str, str], list] = {}
+    for entry in entries:
+        key = group_key(entry.name)
+        if key:
+            groups.setdefault((norm_key(os.path.dirname(entry.path)), key), []).append(entry)
+    folded: set[str] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        raws = [e for e in members if e.kind == "image" and _ext(e.name) in RAW_EXTS]
+        shown = [e for e in members if e.kind == "image" and _ext(e.name) not in RAW_EXTS]
+        if raws and shown:
+            # Show the camera JPEG/HEIF (instant preview), carry the RAW.
+            primary = min(shown, key=lambda e: _PRIMARY_ORDER.index(_ext(e.name)) if _ext(e.name) in _PRIMARY_ORDER else 99)
+            for raw in raws:
+                primary.extras.append(raw.path)
+                folded.add(raw.key)
+    for path in sidecars:
+        name = os.path.basename(path)
+        key = group_key(name)
+        if not key:
+            continue
+        members = [e for e in groups.get((norm_key(os.path.dirname(path)), key), []) if e.key not in folded]
+        if members:
+            _sidecar_owner(members, name).extras.append(path)
+    return [e for e in entries if e.key not in folded] if folded else entries
+
+
+def _suffixed(name: str, stem: str, suffix: str) -> str:
+    if not suffix:
+        return name
+    if name.lower().startswith(stem.lower()):
+        return name[: len(stem)] + suffix + name[len(stem) :]
+    base, ext = os.path.splitext(name)
+    return base + suffix + ext
+
+
+def _restemmed(name: str, old_stem: str, new_stem: str) -> str:
+    """IMG_0001.CR3.xmp -> beach.CR3.xmp when IMG_0001.JPG becomes beach.JPG."""
+    if name.lower().startswith(old_stem.lower()):
+        return new_stem + name[len(old_stem) :]
+    return new_stem + os.path.splitext(name)[1]
+
+
+def group_targets(folder: str, names: list[str]) -> list[str]:
+    """Free names in `folder` for a whole set, sharing one _N suffix (shot_1.jpg + shot_1.cr3)."""
+    stem = os.path.splitext(names[0])[0]
+    counter = 0
+    while True:
+        suffix = f"_{counter}" if counter else ""
+        targets = [os.path.join(folder, _suffixed(name, stem, suffix)) for name in names]
+        if len({norm_key(t) for t in targets}) == len(targets) and not any(os.path.exists(t) for t in targets):
+            return targets
         counter += 1
-    return candidate
+
+
+def _log_group(records: list[tuple[str, str]], index: int) -> list[int]:
+    """Neighbouring log lines that moved together as one shot."""
+
+    def key(i):
+        src, dst = records[i]
+        group = group_key(os.path.basename(src))
+        return (norm_key(os.path.dirname(src)), norm_key(os.path.dirname(dst)), group) if group else None
+
+    target = key(index)
+    if target is None:
+        return [index]
+    lo = hi = index
+    while lo > 0 and index - lo < 16 and key(lo - 1) == target:
+        lo -= 1
+    while hi + 1 < len(records) and hi - index < 16 and key(hi + 1) == target:
+        hi += 1
+    return list(range(lo, hi + 1))
 
 
 # ------------------------------------------------------------------------ settings
@@ -64,6 +272,8 @@ DEFAULT_SETTINGS = {
     "confirm_delete": True,
     "autoplay": True,
     "always_convert": False,
+    "check_updates": True,
+    "keep_together": True,
     "lan_port": 8501,
     "lan_pin": "",
     "lan_secret": "",
@@ -142,7 +352,7 @@ class Settings:
         with self._lock:
             return {
                 key: self.data[key]
-                for key in ("include_subfolders", "confirm_delete", "autoplay", "always_convert", "lan_port")
+                for key in ("include_subfolders", "confirm_delete", "autoplay", "always_convert", "check_updates", "keep_together", "lan_port")
             }
 
 
@@ -158,9 +368,13 @@ class Entry:
     mtime: float
     folder: str
     key: str = field(default="")
+    extras: list[str] = field(default_factory=list)  # RAW partner + sidecars that move with it
 
     def to_json(self) -> dict:
-        return {"p": self.path, "n": self.name, "k": self.kind, "s": self.size, "m": round(self.mtime, 3), "f": self.folder}
+        data = {"p": self.path, "n": self.name, "k": self.kind, "s": self.size, "m": round(self.mtime, 3), "f": self.folder}
+        if self.extras:
+            data["x"] = [os.path.basename(path) for path in self.extras]
+        return data
 
 
 def _entry_for(path: str, root: str) -> Entry | None:
@@ -176,8 +390,9 @@ def _entry_for(path: str, root: str) -> Entry | None:
     return Entry(path, os.path.basename(path), kind, st.st_size, st.st_mtime, folder, norm_key(path))
 
 
-def scan_folder(root: str, recursive: bool, exclude: list[str]) -> list[Entry]:
+def scan_folder(root: str, recursive: bool, exclude: list[str], together: bool = False) -> list[Entry]:
     entries: list[Entry] = []
+    sidecars: list[str] = []
     excluded = {norm_key(path) for path in exclude}
     stack = [(root, "")]
     while stack and len(entries) < MAX_FILES:
@@ -199,15 +414,23 @@ def scan_folder(root: str, recursive: bool, exclude: list[str]) -> list[Entry]:
                         ):
                             stack.append((item.path, f"{rel}/{name}" if rel else name))
                         continue
-                    kind = KIND_BY_EXT.get(os.path.splitext(name)[1].lower())
-                    if not kind:
+                    ext = os.path.splitext(name)[1].lower()
+                    kind = KIND_BY_EXT.get(ext)
+                    if not kind and not (together and ext in SIDECAR_EXTS):
                         continue
+                    if name.startswith("._"):
+                        continue  # macOS resource forks left on camera cards
                     st = item.stat()
                     if getattr(st, "st_file_attributes", 0) & 0x2:  # hidden
                         continue
                 except OSError:
                     continue
-                entries.append(Entry(item.path, name, kind, st.st_size, st.st_mtime, rel, norm_key(item.path)))
+                if kind:
+                    entries.append(Entry(item.path, name, kind, st.st_size, st.st_mtime, rel, norm_key(item.path)))
+                else:
+                    sidecars.append(item.path)
+    if together:
+        entries = group_entries(entries, sidecars)
     entries.sort(key=lambda entry: (natural_key(entry.folder), natural_key(entry.name)))
     return entries
 
@@ -229,10 +452,10 @@ def read_log(path: str) -> list[tuple[str, str]]:
     return records
 
 
-def append_log(path: str, source: str, destination: str):
+def append_log(path: str, pairs: list[tuple[str, str]]):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "a", encoding="utf-8") as handle:
-        handle.write(f"{source} -> {destination}\n")
+        handle.writelines(f"{source} -> {destination}\n" for source, destination in pairs)
 
 
 def drop_log_line(path: str, destination: str, prefer_index: int | None = None) -> bool:
@@ -284,6 +507,7 @@ class Workspace:
         self.logfile = ""
         self._log_cache: tuple[tuple, list[tuple[str, str]]] | None = None
         self.stats = self._fresh_stats(0)
+        self.release = None  # set by the server: stops our own readers of a file
 
         saved = settings.get("source") or ""
         if saved and os.path.isdir(saved):
@@ -310,6 +534,59 @@ class Workspace:
 
     def destinations(self) -> list[dict]:
         return self.settings.get("destinations") or []
+
+    @property
+    def keep_together(self) -> bool:
+        return bool(self.settings.get("keep_together", True))
+
+    def _move_pairs(self, pairs: list[tuple[str, str]]):
+        """Move a set of files; if one fails, put the others back so nothing is split up."""
+        done: list[tuple[str, str]] = []
+        try:
+            for src, dst in pairs:
+                safe_move(src, dst, self.release)
+                done.append((src, dst))
+        except OpError:
+            for src, dst in reversed(done):
+                try:
+                    safe_move(dst, src, self.release)
+                except OpError:
+                    pass
+            raise
+
+    def _rename_pairs(self, pairs: list[tuple[str, str]]):
+        done: list[tuple[str, str]] = []
+        try:
+            for src, dst in pairs:
+                _retry(lambda s=src, d=dst: os.rename(s, d), src, self.release)
+                done.append((src, dst))
+        except OSError as exc:
+            for src, dst in reversed(done):
+                try:
+                    os.rename(dst, src)
+                except OSError:
+                    pass
+            name = os.path.basename(pairs[len(done)][0])
+            if _in_use(exc):
+                raise OpError(IN_USE_MESSAGE.format(name=name).replace("let it move", "let it be renamed"), 409) from exc
+            raise OpError(f"Rename failed: {exc.strerror or exc}") from exc
+
+    def _readd(self, paths: list[str]):
+        """Put restored files back in the list (grouped again when keep-together is on)."""
+        found, sidecars = [], []
+        for path in paths:
+            if not self._in_scope(path):
+                continue
+            entry = _entry_for(path, self.source)
+            if entry is not None:
+                found.append(entry)
+            elif is_sidecar(os.path.basename(path)):
+                sidecars.append(path)
+        if self.keep_together:
+            found = group_entries(found, sidecars)
+        for entry in found:
+            self._insert_entry(entry)
+            self._bump({"op": "add", "e": entry.to_json()})
 
     def _destination(self, path: str) -> dict | None:
         key = norm_key(path)
@@ -369,7 +646,7 @@ class Workspace:
             recursive = bool(self.settings.get("include_subfolders"))
         with self.lock:
             exclude = [item["path"] for item in self.destinations()]
-            entries = scan_folder(path, recursive, exclude)
+            entries = scan_folder(path, recursive, exclude, together=self.keep_together)
             self.source = path
             self.recursive = recursive
             self.entries = entries
@@ -477,46 +754,54 @@ class Workspace:
                 os.makedirs(folder, exist_ok=True)
             except OSError as exc:
                 raise OpError(f"Can't open the destination folder: {exc.strerror or exc}") from exc
-            target = unique_path(folder, entry.name)
-            try:
-                shutil.move(entry.path, target)
-            except OSError as exc:
-                raise OpError(f"Move failed: {exc.strerror or exc}") from exc
+            extras = [path for path in entry.extras if os.path.exists(path)]
+            targets = group_targets(folder, [entry.name] + [os.path.basename(path) for path in extras])
+            pairs = list(zip([entry.path] + extras, targets))
+            self._move_pairs(pairs)
+            target = targets[0]
             self._ensure_logfile()
             log_error = ""
             try:
-                append_log(self.logfile, entry.path, target)
+                append_log(self.logfile, pairs)
                 self._log_cache = None
             except OSError as exc:
                 log_error = f"File moved, but the log couldn't be written: {exc.strerror or exc}"
             self._remove_entry(entry)
-            self.undo_stack.append({"type": "move", "src": entry.path, "dst": target})
+            self.undo_stack.append({"type": "move", "src": entry.path, "dst": target, "extras": [list(pair) for pair in pairs[1:]]})
             del self.undo_stack[:-500]
             self.stats["moved"] += 1
             per_dest = self.stats["per_dest"]
             per_dest[norm_key(folder)] = per_dest.get(norm_key(folder), 0) + 1
             label = dest["label"] or os.path.basename(folder.rstrip("\\/")) or folder
-            self._remember("move", name=entry.name, src=entry.path, dst=target, dest=label)
+            self._remember("move", name=entry.name, src=entry.path, dst=target, dest=label, extras=len(extras))
             self._bump({"op": "remove", "p": entry.path})
-            return {"moved": entry.path, "to": target, "dest": label, "renamed": os.path.basename(target) != entry.name, "warning": log_error}
+            return {
+                "moved": entry.path,
+                "to": target,
+                "dest": label,
+                "renamed": os.path.basename(target) != entry.name,
+                "extras": len(extras),
+                "warning": log_error,
+            }
 
-    def _restore(self, src: str, dst: str) -> str:
-        if not os.path.exists(dst):
+    def _restore_group(self, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """Move a set back to where it came from. Returns the (from, to) moves made."""
+        present = [(src, dst) for src, dst in pairs if os.path.exists(dst)]
+        if not present:
             raise OpError("Can't undo: the moved file isn't at its destination anymore.", 409)
-        restore = src
-        if os.path.exists(restore):
-            restore = unique_path(os.path.dirname(src), os.path.basename(src))
+        folder = os.path.dirname(present[0][0])
         try:
-            os.makedirs(os.path.dirname(restore), exist_ok=True)
-            shutil.move(dst, restore)
+            os.makedirs(folder, exist_ok=True)
         except OSError as exc:
             raise OpError(f"Undo failed: {exc.strerror or exc}") from exc
-        if self._in_scope(restore):
-            entry = _entry_for(restore, self.source)
-            if entry is not None:
-                self._insert_entry(entry)
-                self._bump({"op": "add", "e": entry.to_json()})
-        return restore
+        if all(norm_key(os.path.dirname(src)) == norm_key(folder) for src, _ in present):
+            homes = group_targets(folder, [os.path.basename(src) for src, _ in present])
+        else:
+            homes = [unique_path(os.path.dirname(src), os.path.basename(src)) for src, _ in present]
+        moves = [(dst, home) for (_, dst), home in zip(present, homes)]
+        self._move_pairs(moves)
+        self._readd([home for _, home in moves])
+        return moves
 
     def _mark_history_undone(self, kind: str, dst: str):
         key = norm_key(dst)
@@ -530,16 +815,19 @@ class Workspace:
             while self.undo_stack:
                 action = self.undo_stack.pop()
                 if action["type"] == "move":
+                    pairs = [(action["src"], action["dst"])] + [tuple(pair) for pair in action.get("extras", [])]
                     try:
-                        restored = self._restore(action["src"], action["dst"])
+                        moves = self._restore_group(pairs)
                     except OpError:
-                        if os.path.exists(action["dst"]):
+                        if any(os.path.exists(dst) for _, dst in pairs):
                             self.undo_stack.append(action)
                             raise
-                        continue  # file vanished; skip to the previous action
+                        continue  # files vanished; skip to the previous action
                     if self.logfile:
-                        drop_log_line(self.logfile, action["dst"])
+                        for dst, _ in moves:
+                            drop_log_line(self.logfile, dst)
                         self._log_cache = None
+                    restored = moves[0][1]
                     self.stats["moved"] = max(0, self.stats["moved"] - 1)
                     folder_key = norm_key(os.path.dirname(action["dst"]))
                     per_dest = self.stats["per_dest"]
@@ -547,17 +835,24 @@ class Workspace:
                         per_dest[folder_key] -= 1
                     self._mark_history_undone("move", action["dst"])
                     self._bump({"op": "meta"})
-                    return {"restored": restored, "name": os.path.basename(restored), "kind": "move"}
+                    return {"restored": restored, "name": os.path.basename(restored), "kind": "move", "extras": len(moves) - 1}
                 if action["type"] == "rename":
                     entry = self.by_key.get(norm_key(action["dst"]))
                     if entry is None or not os.path.exists(action["dst"]):
                         continue
-                    if os.path.exists(action["src"]):
+                    pairs = [(action["dst"], action["src"])] + [(dst, src) for src, dst in action.get("extras", []) if os.path.exists(dst)]
+                    if any(os.path.exists(old) and norm_key(old) != norm_key(new) for new, old in pairs):
+                        self.undo_stack.append(action)
                         raise OpError("Can't undo the rename: the old name is taken now.", 409)
-                    os.rename(action["dst"], action["src"])
+                    try:
+                        self._rename_pairs(pairs)
+                    except OpError:
+                        self.undo_stack.append(action)
+                        raise
                     self._remove_entry(entry)
                     restored = _entry_for(action["src"], self.source)
                     if restored is not None:
+                        restored.extras = [old for _, old in pairs[1:]]
                         self._insert_entry(restored)
                     self._bump({"op": "remove", "p": action["dst"]})
                     if restored is not None:
@@ -579,31 +874,44 @@ class Workspace:
             records = self._records()
             if not (0 <= index < len(records)) or norm_key(records[index][1]) != norm_key(destination):
                 raise OpError("The log changed since you opened it. Refresh and try again.", 409)
-            src, dst = records[index]
-            restored = self._restore(src, dst)
-            drop_log_line(self.logfile, dst, prefer_index=index)
+            group = _log_group(records, index) if self.keep_together else [index]
+            moves = self._restore_group([records[i] for i in group])
+            moved = {norm_key(dst) for dst, _ in moves}
+            for i in sorted(group, reverse=True):  # bottom-up keeps the earlier indices valid
+                if norm_key(records[i][1]) in moved:
+                    drop_log_line(self.logfile, records[i][1], prefer_index=i)
             self._log_cache = None
-            key = norm_key(dst)
             before = len(self.undo_stack)
-            self.undo_stack = [item for item in self.undo_stack if norm_key(item.get("dst", "")) != key]
+            self.undo_stack = [item for item in self.undo_stack if norm_key(item.get("dst", "")) not in moved]
             if len(self.undo_stack) != before:
-                self.stats["moved"] = max(0, self.stats["moved"] - 1)
-            self._mark_history_undone("move", dst)
+                self.stats["moved"] = max(0, self.stats["moved"] - (before - len(self.undo_stack)))
+            for dst, _ in moves:
+                self._mark_history_undone("move", dst)
             self._bump({"op": "meta"})
-            return {"restored": restored, "name": os.path.basename(restored)}
+            restored = moves[0][1]
+            return {"restored": restored, "name": os.path.basename(restored), "extras": len(moves) - 1}
 
     def delete(self, path: str, recycle) -> dict:
         with self.lock:
             entry = self._require_entry(path)
             try:
-                recycle(entry.path)
+                _retry(lambda: recycle(entry.path), entry.path, self.release, seconds=2.5)
             except OSError as exc:
                 raise OpError(str(exc)) from exc
+            binned, warning = 0, ""
+            for extra in entry.extras:
+                if not os.path.exists(extra):
+                    continue
+                try:
+                    _retry(lambda x=extra: recycle(x), extra, self.release, seconds=2.5)
+                    binned += 1
+                except OSError as exc:
+                    warning = f"{os.path.basename(extra)} couldn't go to the Recycle Bin: {exc}"
             self._remove_entry(entry)
             self.stats["deleted"] += 1
-            self._remember("delete", name=entry.name, src=entry.path)
+            self._remember("delete", name=entry.name, src=entry.path, extras=binned)
             self._bump({"op": "remove", "p": entry.path})
-            return {"deleted": entry.path}
+            return {"deleted": entry.path, "extras": binned, "warning": warning}
 
     def rename(self, path: str, new_name: str) -> dict:
         new_name = new_name.strip()
@@ -621,15 +929,22 @@ class Workspace:
             target = os.path.join(os.path.dirname(entry.path), new_name)
             if os.path.exists(target) and norm_key(target) != entry.key:
                 raise OpError("A file with that name already exists here.", 409)
-            try:
-                os.rename(entry.path, target)
-            except OSError as exc:
-                raise OpError(f"Rename failed: {exc.strerror or exc}") from exc
+            old_stem, new_stem = os.path.splitext(entry.name)[0], os.path.splitext(new_name)[0]
+            pairs = [(entry.path, target)] + [
+                (x, os.path.join(os.path.dirname(x), _restemmed(os.path.basename(x), old_stem, new_stem)))
+                for x in entry.extras
+                if os.path.exists(x)
+            ]
+            for src, dst in pairs[1:]:
+                if os.path.exists(dst) and norm_key(dst) != norm_key(src):
+                    raise OpError(f"{os.path.basename(dst)} already exists here, so its companion file can't take that name.", 409)
+            self._rename_pairs(pairs)
             self._remove_entry(entry)
             renamed = _entry_for(target, self.source)
             if renamed is not None:
+                renamed.extras = [dst for _, dst in pairs[1:]]
                 self._insert_entry(renamed)
-            self.undo_stack.append({"type": "rename", "src": entry.path, "dst": target})
+            self.undo_stack.append({"type": "rename", "src": entry.path, "dst": target, "extras": [list(pair) for pair in pairs[1:]]})
             self.stats["renamed"] += 1
             self._remember("rename", name=new_name, src=entry.path, dst=target)
             self._bump({"op": "remove", "p": entry.path})
@@ -769,7 +1084,8 @@ class Workspace:
         last = self.undo_stack[-1] if self.undo_stack else None
         records = self._records()
         if last:
-            undo_label = f"{last['type']} {os.path.basename(last['src'])}"
+            extra = len(last.get("extras") or [])
+            undo_label = f"{last['type']} {os.path.basename(last['src'])}" + (f" +{extra}" if extra else "")
         elif records:
             undo_label = f"move {os.path.basename(records[-1][0])} back (move log)"
         else:

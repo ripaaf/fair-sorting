@@ -9,6 +9,17 @@ A manual media sorter for photos, videos and audio. Open a folder, add the folde
 
 ## What's new in 2.x
 
+**2.2 — for photographers and videographers**
+
+- **RAW done right.** Portrait shots from every major camera (CR3, CR2, NEF, ARW, RAF, RW2, ORF, PEF, DNG, IIQ, 3FR and more) now show upright. Fair Sorting reads the camera's embedded preview directly, so a RAW opens about as fast as a JPEG, with camera, lens settings and the real sensor size in the details.
+- **RAW+JPEG and sidecars stay together.** One item per shot: the RAW, `.xmp` edits, `.THM`, drone `.SRT`, `.LRF`/`.LRV` proxies, Apple `.AAE` and Sony `C0001M01.XML` move, rename, go to the Recycle Bin and undo with their main file. Switch it off in Settings to see every file on its own.
+- **Pro video just plays.** 10-bit and 4:2:2 footage (Sony XAVC S-I/HS, Panasonic All-I, Canon) is spotted up front and gets a quick, upright preview copy instead of a black frame. Vertical clips stay vertical. The details show the chroma sampling and bit depth.
+- **Updates itself.** Fair Sorting checks GitHub when it starts, shows what's new, and installs the update in place with one click. Settings and move logs stay as they are, and every download is checked against its SHA-256.
+- **More formats:** Insta360 `.insv`, GoPro MAX `.360`, AVCHD `.mts`/`.m2t`, DV, MXF, AIFF, CAF, BWF/RF64, WavPack, DSD and more. Blackmagic `.braw`, RED `.r3d` and Canon `.crm` can be sorted too (no preview).
+- **Busy files are handled.** If a player or antivirus still holds a file, Fair Sorting waits a moment and retries instead of failing or leaving a half-copied duplicate.
+
+**2.0 – 2.1**
+
 - **One interface, two ways to open it.** The desktop app and the web version are now the same UI, so they look and behave identically.
 - **Much lighter and faster.** Streamlit, OpenCV, pygame and numpy are gone. Photos and MP4/WebM/MP3 open instantly; only odd formats are converted, once, and cached.
 - **Smarter playback.** Videos and audio play in the built-in player. AVI, WMV, MKV with AC3/DTS audio, WMA and friends are detected with ffprobe and converted automatically, with a progress bar.
@@ -46,7 +57,9 @@ All three include FFmpeg. The installer installs just for you (no admin prompt) 
 
 The first time you open Fair Sorting a short guided tour walks you through these steps. Replay it any time from Settings › Help.
 
-Moved files never overwrite anything: a name clash becomes `name_1.jpg`, `name_2.jpg`, and so on.
+Moved files never overwrite anything: a name clash becomes `name_1.jpg`, `name_2.jpg`, and so on (a RAW+JPEG set keeps one shared number: `name_1.jpg` + `name_1.cr3`).
+
+Fair Sorting looks for a new version on GitHub when it starts (turn it off in Settings › Updates). When there is one, the gear icon gets a dot; open it to read what's new and press **Download & install**.
 
 ## Keyboard shortcuts
 
@@ -102,13 +115,17 @@ Each folder you sort gets a `move_log_<timestamp>.txt` inside it, one `source ->
 
 ## Supported formats
 
-**Images** `.jpg` `.jpeg` `.png` `.gif` `.bmp` `.tiff` `.tif` `.webp` `.heic` `.heif` `.avif` `.jp2` `.j2k` `.jpf` `.jfif` `.ico` `.tga` `.ppm` `.pgm` `.pbm` `.pnm` `.hdr` `.exr` `.psd` `.raw` `.cr2` `.nef` `.orf` `.arw` `.rw2` `.dng` `.xcf` `.pcx`
+**Images** `.jpg` `.jpeg` `.jpe` `.png` `.gif` `.bmp` `.tiff` `.tif` `.webp` `.heic` `.heif` `.hif` `.avif` `.jp2` `.j2k` `.jpf` `.jfif` `.ico` `.tga` `.ppm` `.pgm` `.pbm` `.pnm` `.hdr` `.exr` `.dpx` `.psd` `.psb` `.xcf` `.pcx` `.qoi`
 
-**Video** `.mp4` `.avi` `.mkv` `.webm` `.mov` `.flv` `.3gp` `.wmv` `.rmvb` `.m4v` `.mpeg` `.mpg` `.divx` `.ogv` `.ts` `.m2ts` `.vob` `.mts` `.asf` `.rm` `.ogm` `.mxf` `.f4v`
+**Camera RAW** `.cr3` `.cr2` `.crw` (Canon) · `.nef` `.nrw` (Nikon) · `.arw` `.srf` `.sr2` (Sony) · `.raf` (Fujifilm) · `.rw2` `.rwl` (Panasonic, Leica) · `.orf` `.ori` (OM System, Olympus) · `.pef` (Pentax) · `.srw` (Samsung) · `.dng` · `.3fr` `.fff` (Hasselblad) · `.iiq` `.cap` `.eip` (Phase One) · `.mef` `.mos` (Mamiya, Leaf) · `.erf` `.mrw` `.x3f` `.kdc` `.dcr` `.k25` `.gpr` `.raw`
 
-**Audio** `.mp3` `.wav` `.m4a` `.ogg` `.wma` `.aac` `.ape` `.alac` `.mid` `.ac3` `.amr` `.ra` `.opus` `.flac`
+**Video** `.mp4` `.mov` `.qt` `.mkv` `.webm` `.avi` `.mxf` `.mts` `.m2ts` `.m2t` `.ts` `.mod` `.tod` `.dv` `.insv` `.360` `.flv` `.3gp` `.3g2` `.wmv` `.rmvb` `.m4v` `.mpeg` `.mpg` `.mpe` `.divx` `.ogv` `.vob` `.asf` `.rm` `.ogm` `.f4v` `.y4m` · sortable without preview: `.braw` `.r3d` `.crm`
 
-JPG/PNG/GIF/WebP/AVIF, MP4/WebM and MP3/WAV/FLAC/OGG are shown directly. Everything else is converted once with Pillow or FFmpeg and cached. Camera RAW files show their embedded full-size preview.
+**Audio** `.mp3` `.wav` `.bwf` `.rf64` `.w64` `.flac` `.m4a` `.m4b` `.aac` `.ogg` `.oga` `.opus` `.weba` `.aif` `.aiff` `.aifc` `.caf` `.wma` `.ape` `.alac` `.wv` `.tta` `.dsf` `.dff` `.mpc` `.spx` `.mka` `.mp2` `.ac3` `.eac3` `.dts` `.amr` `.ra` `.au` `.mid` `.midi`
+
+**Sidecars that travel with their file** `.xmp` `.thm` `.srt` `.lrf` `.lrv` `.aae` `.pp3` `.dop` `.on1` `.dr4` `.vrd` and Sony `…M01.XML`
+
+JPG/PNG/GIF/WebP/AVIF, MP4/WebM and MP3/WAV/FLAC/OGG are shown directly. Camera RAW files show the camera's own embedded preview, the right way up. Everything else is converted once with Pillow or FFmpeg and cached; video that the browser can't decode (10-bit, 4:2:2, ProRes, DNxHD…) gets a light 1280-pixel preview copy.
 
 ## Files it creates
 

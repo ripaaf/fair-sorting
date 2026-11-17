@@ -27,6 +27,8 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
+from . import rawprev
+from .env import norm_key
 from .env import (
     APP_HOME,
     CACHE_DIR,
@@ -48,16 +50,27 @@ except Exception:  # pragma: no cover - optional dependency
 # Big panoramas are legitimate here; keep a ceiling against absurd files.
 Image.MAX_IMAGE_PIXELS = 500_000_000
 
+# Camera RAW from every major maker: Canon, Nikon, Sony, Fujifilm, Panasonic/Leica,
+# Olympus/OM, Pentax/Ricoh, Samsung, Hasselblad, Phase One, Leaf, Mamiya, Minolta,
+# Sigma, Kodak, Epson, GoPro and Adobe DNG.
+RAW_EXTS = frozenset(
+    """.raw .cr2 .cr3 .crw .nef .nrw .arw .srf .sr2 .raf .rw2 .rwl .orf .ori .pef .srw .dng
+    .3fr .fff .iiq .cap .eip .mef .mos .erf .mrw .x3f .kdc .dcr .k25 .gpr""".split()
+)
 IMAGE_EXTS = frozenset(
-    """.jpg .jpeg .png .gif .bmp .tiff .tif .webp .heic .heif .avif .jp2 .j2k .jpf .jfif
-    .ico .tga .ppm .pgm .pbm .pnm .hdr .exr .psd .raw .cr2 .nef .orf .arw .rw2 .dng .xcf .pcx""".split()
-)
+    """.jpg .jpeg .jpe .png .gif .bmp .tiff .tif .webp .heic .heif .hif .avif .jp2 .j2k .jpf .jfif
+    .ico .tga .ppm .pgm .pbm .pnm .hdr .exr .dpx .psd .psb .xcf .pcx .qoi""".split()
+) | RAW_EXTS
 VIDEO_EXTS = frozenset(
-    """.mp4 .avi .mkv .webm .mov .flv .3gp .wmv .rmvb .m4v .mpeg .mpg .divx .ogv .ts .m2ts
-    .vob .mts .asf .rm .ogm .mxf .f4v""".split()
+    """.mp4 .avi .mkv .webm .mov .qt .flv .3gp .3g2 .wmv .rmvb .m4v .mpeg .mpg .mpe .divx .ogv .ts .m2ts .m2t
+    .vob .mts .mod .tod .dv .asf .rm .ogm .mxf .f4v .y4m .insv .360 .braw .r3d .crm""".split()
 )
-AUDIO_EXTS = frozenset(".mp3 .wav .m4a .ogg .wma .aac .ape .alac .mid .ac3 .amr .ra .opus .flac".split())
-RAW_EXTS = frozenset(".raw .cr2 .nef .orf .arw .rw2 .dng".split())
+AUDIO_EXTS = frozenset(
+    """.mp3 .wav .bwf .rf64 .w64 .m4a .m4b .ogg .oga .wma .aac .ape .alac .mid .midi .ac3 .eac3 .dts .amr .ra
+    .opus .flac .aif .aiff .aifc .caf .wv .tta .dsf .dff .mpc .spx .mka .mp2 .au .weba""".split()
+)
+# Cinema RAW that FFmpeg can't decode: still sortable, just without a preview.
+NO_PREVIEW_EXTS = frozenset(".braw .r3d .crm".split())
 
 KIND_BY_EXT: dict[str, str] = {}
 KIND_BY_EXT.update({ext: "image" for ext in IMAGE_EXTS})
@@ -65,15 +78,16 @@ KIND_BY_EXT.update({ext: "video" for ext in VIDEO_EXTS})
 KIND_BY_EXT.update({ext: "audio" for ext in AUDIO_EXTS})
 
 # What a Chromium-based view (WebView2, Edge, Chrome, Android) shows directly.
-WEB_IMAGE_EXTS = frozenset(".jpg .jpeg .jfif .png .gif .bmp .webp .avif .ico".split())
+WEB_IMAGE_EXTS = frozenset(".jpg .jpeg .jpe .jfif .png .gif .bmp .webp .avif .ico".split())
 # Containers worth trying natively first; the client falls back to conversion on error.
-WEB_VIDEO_EXTS = frozenset(".mp4 .m4v .mov .webm .ogv .mkv".split())
-WEB_AUDIO_EXTS = frozenset(".mp3 .wav .m4a .ogg .aac .opus .flac".split())
+WEB_VIDEO_EXTS = frozenset(".mp4 .m4v .mov .qt .webm .ogv .mkv .insv .360".split())
+WEB_AUDIO_EXTS = frozenset(".mp3 .wav .bwf .m4a .m4b .ogg .oga .aac .opus .flac .weba".split())
 
 MIME_BY_EXT = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".jfif": "image/jpeg",
+    ".jpe": "image/jpeg",
     ".png": "image/png",
     ".gif": "image/gif",
     ".bmp": "image/bmp",
@@ -83,11 +97,18 @@ MIME_BY_EXT = {
     ".mp4": "video/mp4",
     ".m4v": "video/mp4",
     ".mov": "video/mp4",  # Chromium plays most QuickTime/H.264 when labelled mp4
+    ".qt": "video/mp4",
+    ".insv": "video/mp4",  # Insta360: MP4 inside
+    ".360": "video/mp4",  # GoPro MAX: MP4 inside
     ".webm": "video/webm",
     ".mkv": "video/webm",
     ".ogv": "video/ogg",
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
+    ".bwf": "audio/wav",
+    ".m4b": "audio/mp4",
+    ".oga": "audio/ogg",
+    ".weba": "audio/webm",
     ".m4a": "audio/mp4",
     ".ogg": "audio/ogg",
     ".opus": "audio/ogg",
@@ -210,22 +231,67 @@ class Tools:
 TOOLS = Tools()
 
 
-def run_tool(args: list[str], timeout: float | None = 30.0) -> tuple[int, bytes, str]:
+# Helper processes (ffprobe, thumbnail ffmpeg, conversions) keep the media file
+# open, and Windows refuses to move an open file. Every process is registered
+# under the file it reads so a move can stop them first (see release()).
+_procs_lock = threading.Lock()
+_procs: dict[str, set] = {}
+
+
+def _track(path: str | None, process, add: bool):
+    if not path:
+        return
+    key = norm_key(path)
+    with _procs_lock:
+        if add:
+            _procs.setdefault(key, set()).add(process)
+        else:
+            bucket = _procs.get(key)
+            if bucket is not None:
+                bucket.discard(process)
+                if not bucket:
+                    _procs.pop(key, None)
+
+
+def release(path: str) -> int:
+    """Stop every helper process that has this file open. Returns how many."""
+    key = norm_key(path)
+    with _procs_lock:
+        processes = list(_procs.get(key, ()))
+    for process in processes:
+        try:
+            process.kill()
+        except OSError:
+            pass
+    for process in processes:
+        try:
+            process.wait(timeout=3)
+        except Exception:
+            pass
+    return len(processes)
+
+
+def run_tool(args: list[str], timeout: float | None = 30.0, owner: str | None = None) -> tuple[int, bytes, str]:
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            timeout=timeout,
-            check=False,
             **hidden_process_kwargs(),
         )
-    except subprocess.TimeoutExpired:
-        return -1, b"", "timed out"
     except OSError as exc:
         return -1, b"", str(exc)
-    return result.returncode, result.stdout, result.stderr.decode("utf-8", "replace")
+    _track(owner, process, True)
+    try:
+        out, err = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        return -1, b"", "timed out"
+    finally:
+        _track(owner, process, False)
+    return process.returncode, out, err.decode("utf-8", "replace")
 
 
 # ------------------------------------------------------------------------ metadata
@@ -265,6 +331,7 @@ def probe(path: str) -> dict:
     code, out, _ = run_tool(
         [TOOLS.ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path],
         timeout=10,
+        owner=path,
     )
     info: dict = {}
     if code == 0:
@@ -312,6 +379,9 @@ def probe(path: str) -> dict:
                     "width": width,
                     "height": height,
                     "fps": round(_parse_rate(stream.get("avg_frame_rate") or stream.get("r_frame_rate")), 3),
+                    "pix_fmt": stream.get("pix_fmt", "") or "",
+                    "profile": stream.get("profile", "") or "",
+                    "rotation": rotation,
                 }
             elif kind == "audio" and "audio" not in info:
                 info["audio"] = {
@@ -342,8 +412,58 @@ def _fraction(value) -> float:
             return 0.0
 
 
+def _camera_fields(meta: dict, make: str, model: str, taken: str, exposure: float, aperture: float, iso, focal: float):
+    make, model = make.strip(), model.strip()
+    if model and make and model.lower().startswith(make.lower().split(" ")[0]):
+        camera = model
+    else:
+        camera = " ".join(part for part in (make, model) if part)
+    if camera:
+        meta["camera"] = camera
+    if exposure:
+        meta["shutter"] = f"1/{round(1 / exposure)}" if exposure < 1 else f"{exposure:g}s"
+    if aperture:
+        meta["aperture"] = f"f/{aperture:.1f}".replace(".0", "")
+    if iso:
+        meta["iso"] = int(iso[0] if isinstance(iso, tuple) else iso)
+    if focal:
+        meta["focal"] = f"{focal:.0f}mm"
+    if taken and len(taken) >= 19 and taken[4] == ":":
+        meta["taken"] = f"{taken[0:4]}-{taken[5:7]}-{taken[8:10]}T{taken[11:19]}"
+
+
+def _raw_meta(path: str) -> dict:
+    """RAW files: read the header directly (Pillow only sees a tiny thumbnail, if anything)."""
+    meta: dict = {"format": ext_of(path).lstrip(".").upper()}
+    try:
+        info = rawprev.inspect(path)
+    except Exception:
+        return meta
+    width, height = info.width, info.height
+    best = info.best()
+    if best is not None:
+        # Report the shape people will see: the upright preview's.
+        shown_w, shown_h = best.width, best.height
+        if info.orientation_for(best) in (5, 6, 7, 8):
+            shown_w, shown_h = shown_h, shown_w
+        if (shown_h > shown_w) != (height > width):
+            width, height = height, width
+    elif info.orientation in (5, 6, 7, 8):
+        width, height = height, width
+    if width and height:
+        meta["width"], meta["height"] = width, height
+    if best is not None:
+        meta["embedded"] = f"{best.width} × {best.height}"
+    else:
+        meta["note"] = "no embedded preview"
+    _camera_fields(meta, info.make, info.model, info.taken, info.exposure, info.fnumber, info.iso, info.focal)
+    return meta
+
+
 def image_meta(path: str) -> dict:
     """Dimensions plus the EXIF bits people actually look at when sorting."""
+    if ext_of(path) in RAW_EXTS:
+        return _raw_meta(path)
     meta: dict = {}
     try:
         with Image.open(path) as im:
@@ -356,14 +476,6 @@ def image_meta(path: str) -> dict:
             if exif:
                 if exif.get(0x0112) in (5, 6, 7, 8):
                     width, height = height, width
-                make = _exif_text(exif.get(0x010F, ""))
-                model = _exif_text(exif.get(0x0110, ""))
-                if model and make and model.lower().startswith(make.lower().split(" ")[0]):
-                    camera = model
-                else:
-                    camera = " ".join(part for part in (make, model) if part)
-                if camera:
-                    meta["camera"] = camera
                 taken = _exif_text(exif.get(0x0132, ""))
                 try:
                     sub = exif.get_ifd(0x8769)
@@ -371,27 +483,19 @@ def image_meta(path: str) -> dict:
                     sub = {}
                 if sub:
                     taken = _exif_text(sub.get(0x9003, "")) or taken
-                    exposure = _fraction(sub.get(0x829A))
-                    if exposure:
-                        meta["shutter"] = f"1/{round(1 / exposure)}" if exposure < 1 else f"{exposure:g}s"
-                    aperture = _fraction(sub.get(0x829D))
-                    if aperture:
-                        meta["aperture"] = f"f/{aperture:.1f}".replace(".0", "")
-                    iso = sub.get(0x8827)
-                    if iso:
-                        meta["iso"] = int(iso[0] if isinstance(iso, tuple) else iso)
-                    focal = _fraction(sub.get(0x920A))
-                    if focal:
-                        meta["focal"] = f"{focal:.0f}mm"
-                if taken and len(taken) >= 19 and taken[4] == ":":
-                    meta["taken"] = f"{taken[0:4]}-{taken[5:7]}-{taken[8:10]}T{taken[11:19]}"
+                _camera_fields(
+                    meta,
+                    _exif_text(exif.get(0x010F, "")),
+                    _exif_text(exif.get(0x0110, "")),
+                    taken,
+                    _fraction(sub.get(0x829A)) if sub else 0.0,
+                    _fraction(sub.get(0x829D)) if sub else 0.0,
+                    sub.get(0x8827) if sub else 0,
+                    _fraction(sub.get(0x920A)) if sub else 0.0,
+                )
             meta["width"], meta["height"] = width, height
     except Exception:
-        embedded = _embedded_jpeg(path) if ext_of(path) in RAW_EXTS else None
-        if embedded is not None:
-            meta["width"], meta["height"] = embedded.size
-            meta["format"] = ext_of(path).lstrip(".").upper()
-            meta["note"] = "embedded preview"
+        pass
     return meta
 
 
@@ -414,12 +518,14 @@ def describe(path: str) -> dict:
             if data.get("tags"):
                 info["tags"] = data["tags"]
             if data.get("video") and kind == "video":
-                info.update(
-                    width=data["video"]["width"],
-                    height=data["video"]["height"],
-                    fps=data["video"]["fps"],
-                    vcodec=data["video"]["codec"],
-                )
+                video = data["video"]
+                info.update(width=video["width"], height=video["height"], fps=video["fps"], vcodec=video["codec"])
+                if video.get("pix_fmt"):
+                    info["pix_fmt"] = video["pix_fmt"]
+                if video.get("profile"):
+                    info["profile"] = video["profile"]
+                if video.get("rotation"):
+                    info["rotation"] = video["rotation"]
             if data.get("audio"):
                 info["acodec"] = data["audio"]["codec"]
                 info["channels"] = data["audio"]["channels"]
@@ -427,7 +533,37 @@ def describe(path: str) -> dict:
             info["cover"] = bool(data.get("cover"))
         if kind == "audio" and not info.get("cover"):
             info["cover"] = folder_art(path) is not None
+        if data:
+            info["convert"] = needs_conversion(kind, data)
+    if ext_of(path) in NO_PREVIEW_EXTS:
+        info["preview"] = False
     return info
+
+
+# What Chromium/WebView2 decodes itself. Pro cameras often record 10-bit or
+# 4:2:2 H.264/HEVC (Sony XAVC S-I/HS, Panasonic All-I, Canon...): same codec
+# name, but the browser shows a black frame, so those get a proxy up front.
+NATIVE_VCODECS = frozenset({"h264", "hevc", "vp8", "vp9", "av1", "theora"})
+NATIVE_ACODECS = frozenset({"aac", "mp3", "opus", "vorbis", "flac"})
+_PIX_8BIT_420 = frozenset({"yuv420p", "yuvj420p", "nv12"})
+_PIX_420 = _PIX_8BIT_420 | {"yuv420p10le", "p010le", "yuv420p10be"}
+
+
+def needs_conversion(kind: str, data: dict) -> bool:
+    video, audio = data.get("video"), data.get("audio")
+    if kind == "video" and video:
+        codec, pix = video.get("codec", ""), video.get("pix_fmt", "")
+        if codec not in NATIVE_VCODECS:
+            return True
+        if codec in ("h264", "theora") and pix and pix not in _PIX_8BIT_420:
+            return True
+        if pix and pix not in _PIX_420:
+            return True
+    if audio:
+        codec = audio.get("codec", "")
+        if codec and codec not in NATIVE_ACODECS and not codec.startswith("pcm_"):
+            return True
+    return False
 
 
 # Music rips usually ship the album art next to the tracks.
@@ -489,37 +625,19 @@ def _has_alpha(im: Image.Image) -> bool:
     return im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info)
 
 
-def _embedded_jpeg(path: str) -> Image.Image | None:
-    """Most camera RAW files carry a full-size JPEG preview; find the biggest one."""
+def _raw_image(path: str, want: int = 0) -> Image.Image | None:
+    """The camera's embedded JPEG, rotated the way the RAW header says."""
     try:
-        size = os.path.getsize(path)
-        if size > 200 * 1024 * 1024:
-            return None
-        data = Path(path).read_bytes()
-    except OSError:
-        return None
-    best: tuple[int, int] | None = None
-    start = 0
-    for _ in range(32):
-        index = data.find(b"\xff\xd8\xff", start)
-        if index < 0:
-            break
-        start = index + 3
-        try:
-            with Image.open(io.BytesIO(data[index : index + 40 * 1024 * 1024])) as candidate:
-                area = candidate.size[0] * candidate.size[1]
-        except Exception:
-            continue
-        if best is None or area > best[1]:
-            best = (index, area)
-    if best is None or best[1] < 160 * 120:
-        return None
-    try:
-        im = Image.open(io.BytesIO(data[best[0] : best[0] + 40 * 1024 * 1024]))
-        im.load()
-        return ImageOps.exif_transpose(im)
+        return rawprev.load(path, want)
     except Exception:
         return None
+
+
+def _raw_orientation(path: str) -> int:
+    try:
+        return rawprev.inspect(path).orientation or 1
+    except Exception:
+        return 1
 
 
 def _ffmpeg_frame(path: str, seek: float | None = None, max_width: int | None = None, timeout: float = 20) -> Image.Image | None:
@@ -533,7 +651,7 @@ def _ffmpeg_frame(path: str, seek: float | None = None, max_width: int | None = 
     if max_width:
         args += ["-vf", f"scale='min({max_width},iw)':-2"]
     args += ["-f", "image2pipe", "-vcodec", "png", "-"]
-    code, out, _ = run_tool(args, timeout=timeout)
+    code, out, _ = run_tool(args, timeout=timeout, owner=path)
     if code != 0 or not out:
         return None
     try:
@@ -545,20 +663,25 @@ def _ffmpeg_frame(path: str, seek: float | None = None, max_width: int | None = 
 
 
 def decode_image(path: str) -> Image.Image | None:
+    raw = ext_of(path) in RAW_EXTS
+    small = None
+    if raw:
+        im = _raw_image(path)
+        if im is not None:
+            return im
     try:
         im = Image.open(path)
         im.load()
-        return ImageOps.exif_transpose(im) or im
+        im = ImageOps.exif_transpose(im) or im
+        if not raw or max(im.size) >= 1200:
+            return im
+        small = im  # a DNG's tiny IFD0 thumbnail: try for something bigger first
     except Exception:
         pass
-    if ext_of(path) in RAW_EXTS:
-        embedded = _embedded_jpeg(path)
-        if embedded is not None:
-            return embedded
     frame = _ffmpeg_frame(path)
     if frame is not None:
-        return frame
-    return _embedded_jpeg(path)
+        return rawprev.orient(frame, _raw_orientation(path)) if raw else frame
+    return small
 
 
 def _atomic_save(im: Image.Image, target: Path, fmt: str, **params):
@@ -580,7 +703,7 @@ def ensure_view(path: str) -> tuple[str, str]:
     ext = ext_of(path)
     if ext in WEB_IMAGE_EXTS:
         return path, MIME_BY_EXT[ext]
-    key = cache_key(path, "view-v2")
+    key = cache_key(path, "view-raw3" if ext in RAW_EXTS else "view-v2")
     jpg, png = VIEW_DIR / f"{key}.jpg", VIEW_DIR / f"{key}.png"
     for candidate, mime in ((jpg, "image/jpeg"), (png, "image/png")):
         if candidate.exists():
@@ -611,7 +734,7 @@ _thumb_failures: set[str] = set()
 def thumbnail(path: str, size: int = 256) -> str | None:
     """Small JPEG for filmstrips/history. None when there is nothing to show."""
     size = 128 if size <= 160 else 256 if size <= 320 else 512
-    key = cache_key(path, f"thumb-{size}")
+    key = cache_key(path, f"thumb-{size}-raw3" if ext_of(path) in RAW_EXTS else f"thumb-{size}")
     target = THUMB_DIR / key[:2] / f"{key}.jpg"
     if target.exists():
         return str(target)
@@ -638,6 +761,11 @@ def thumbnail(path: str, size: int = 256) -> str | None:
 
 def _build_thumbnail(path: str, size: int) -> Image.Image | None:
     kind = media_kind(path)
+    if ext_of(path) in NO_PREVIEW_EXTS:
+        return None
+    if kind == "image" and ext_of(path) in RAW_EXTS:
+        im = _raw_image(path, want=size * 2)
+        return im if im is not None else decode_image(path)
     if kind == "image":
         try:
             im = Image.open(path)
@@ -754,10 +882,14 @@ class Converter:
             out = PLAY_DIR / f"{job.key}.mp3"
             return [(base + ["-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "3", "-f", "mp3"], out, "audio/mpeg")]
 
-        vcodec = (info.get("video") or {}).get("codec", "")
+        video = info.get("video") or {}
+        vcodec = video.get("codec", "")
+        pix = video.get("pix_fmt", "")
         acodec = (info.get("audio") or {}).get("codec", "") if info.get("audio") else ""
         plans: list[tuple[list[str], Path, str]] = []
         maps = ["-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]
+        if vcodec == "h264" and pix and pix not in _PIX_8BIT_420:
+            vcodec = "h264-pro"  # 10-bit / 4:2:2: copying it would just move the black frame
         if vcodec == "h264" and acodec in ("", "aac", "mp3"):
             plans.append((base + maps + ["-c", "copy", "-movflags", "+faststart", "-f", "mp4"], mp4, "video/mp4"))
         elif vcodec == "h264":
@@ -772,8 +904,11 @@ class Converter:
                 base
                 + maps
                 + [
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-                    "-vf", "scale='trunc(min(1920,iw)/2)*2':-2",
+                    # A preview proxy, not a master: capped at 1280 on the long side
+                    # (portrait-aware, after FFmpeg applies the rotation flag) so
+                    # 4K/10-bit camera files are ready in seconds.
+                    "-c:v", "libx264", "-preset", "superfast", "-crf", "24", "-pix_fmt", "yuv420p",
+                    "-vf", "scale='if(gte(iw,ih),min(1280,iw),-2)':'if(gte(iw,ih),-2,min(1280,ih))'",
                     "-c:a", "aac", "-b:a", "160k", "-ac", "2",
                     "-movflags", "+faststart", "-f", "mp4",
                 ],
@@ -821,6 +956,7 @@ class Converter:
         except OSError as exc:
             return False, str(exc)
         job.process = process
+        _track(job.source, process, True)
         tail: list[str] = []
 
         def drain_stderr():
@@ -848,9 +984,24 @@ class Converter:
         finally:
             reader.join(timeout=2)
             job.process = None
+            _track(job.source, process, False)
         if job.status == "cancelled":
             return False, "cancelled"
         return process.returncode == 0, "\n".join(line for line in tail if line)
+
+    def cancel(self, path: str):
+        """Drop any conversion of this file (it's being moved, renamed or deleted)."""
+        key = norm_key(path)
+        with self._lock:
+            for job in self._jobs.values():
+                if norm_key(job.source) == key and job.status in ("queued", "running"):
+                    job.status = "cancelled"
+                    job.touched = -1e9
+                    if job.process is not None:
+                        try:
+                            job.process.kill()
+                        except OSError:
+                            pass
 
     def output_for(self, path: str, kind: str) -> tuple[str, str] | None:
         return self.cached_output(path, kind)

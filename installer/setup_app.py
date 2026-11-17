@@ -6,6 +6,8 @@ bundles the app folder as payload.zip.
     Fair Sorting Setup.exe                     # wizard
     Fair Sorting Setup.exe --silent            # install to the default folder, no UI
     Fair Sorting Setup.exe --silent --dir D:\\Apps --no-desktop
+    Fair Sorting Setup.exe --update --dir <app folder> --wait-pid <pid> [--portable]
+                                               # used by the in-app updater
 """
 
 from __future__ import annotations
@@ -44,16 +46,39 @@ def payload_size_mb() -> int:
         return 0
 
 
+def wait_for_exit(pid: int | None, timeout_ms: int = 60000):
+    """Block until the old copy of the app has closed (Windows only)."""
+    if not pid or os.name != "nt":
+        return
+    import ctypes
+
+    handle = ctypes.windll.kernel32.OpenProcess(0x00100000, False, int(pid))  # SYNCHRONIZE
+    if handle:
+        ctypes.windll.kernel32.WaitForSingleObject(handle, timeout_ms)
+        ctypes.windll.kernel32.CloseHandle(handle)
+    time.sleep(0.4)
+
+
 class Api:
     """Methods callable from the page as window.pywebview.api.<name>()."""
 
-    def __init__(self):
+    def __init__(self, update: dict | None = None):
+        self._update = update
         self._window = None
         self._state = {"pct": 0.0, "stage": "", "done": False, "error": "", "target": ""}
         self._thread: threading.Thread | None = None
 
     def info(self):
         existing = inst.existing_install()
+        if self._update:
+            return {
+                "version": __version__,
+                "dir": self._update["dir"],
+                "existing": existing,
+                "payload": PAYLOAD.exists(),
+                "size_mb": payload_size_mb(),
+                "update": True,
+            }
         return {
             "version": __version__,
             "dir": existing["dir"] if existing else str(inst.default_dir()),
@@ -81,7 +106,11 @@ class Api:
 
         def work():
             try:
-                target = inst.install(PAYLOAD, folder, bool(desktop), bool(start_menu), report)
+                update = self._update or {}
+                if update.get("pid"):
+                    report(0.0, "Waiting for Fair Sorting to close")
+                    wait_for_exit(update["pid"])
+                target = inst.install(PAYLOAD, folder, bool(desktop), bool(start_menu), report, register_app=not update.get("portable"))
                 self._state.update(done=True, pct=1.0, target=str(target))
             except inst.InstallError as exc:
                 self._state["error"] = str(exc)
@@ -108,31 +137,36 @@ class Api:
             threading.Thread(target=self._window.destroy, daemon=True).start()
 
 
-def build_html() -> str:
+def build_html(auto: bool = False) -> str:
     html = UI_FILE.read_text(encoding="utf-8")
     mascot = base64.b64encode(MASCOT.read_bytes()).decode("ascii") if MASCOT.exists() else ""
-    return html.replace("__MASCOT__", f"data:image/png;base64,{mascot}").replace("__VERSION__", __version__)
+    html = html.replace("__MASCOT__", f"data:image/png;base64,{mascot}").replace("__VERSION__", __version__)
+    return html.replace("const AUTO = false", f"const AUTO = {'true' if auto else 'false'}")
 
 
-def run_silent(folder: str | None, desktop: bool) -> int:
+def run_silent(folder: str | None, desktop: bool, pid: int | None = None, portable: bool = False, launch: bool = False) -> int:
+    wait_for_exit(pid)
     try:
-        target = inst.install(PAYLOAD, folder or str(inst.default_dir()), desktop, True)
+        target = inst.install(PAYLOAD, folder or str(inst.default_dir()), desktop, True, register_app=not portable)
     except inst.InstallError as exc:
         print(f"Install failed: {exc}", file=sys.stderr)
         return 1
     print(f"Installed to {target}")
+    if launch:
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        subprocess.Popen([str(target / inst.EXE_NAME)], cwd=str(target), creationflags=flags, close_fds=True)
     return 0
 
 
-def run_wizard() -> int:
+def run_wizard(update: dict | None = None) -> int:
     import webview  # type: ignore
 
     from fairsort.desktop import _apply_icon, _set_app_id, style_titlebar
 
     _set_app_id()
-    api = Api()
+    api = Api(update)
     window = webview.create_window(
-        TITLE, html=build_html(), js_api=api, width=780, height=500,
+        TITLE, html=build_html(auto=update is not None), js_api=api, width=780, height=500,
         resizable=False, background_color="#121114", text_select=False,
     )
     api._window = window
@@ -156,9 +190,15 @@ def main() -> int:
     parser.add_argument("--silent", action="store_true", help="install without showing the wizard")
     parser.add_argument("--dir", default=None, help="install folder (silent mode)")
     parser.add_argument("--no-desktop", action="store_true", help="skip the desktop shortcut (silent mode)")
+    parser.add_argument("--update", action="store_true", help="update the copy in --dir and reopen it (used by the app)")
+    parser.add_argument("--wait-pid", type=int, default=None, help="wait for this process to exit first")
+    parser.add_argument("--portable", action="store_true", help="portable folder: no shortcuts or Apps entry")
+    parser.add_argument("--launch", action="store_true", help="silent mode: open the app afterwards")
     args = parser.parse_args()
     if args.silent:
-        return run_silent(args.dir, not args.no_desktop)
+        return run_silent(args.dir, not args.no_desktop, args.wait_pid, args.portable, args.launch)
+    if args.update and args.dir:
+        return run_wizard({"dir": args.dir, "pid": args.wait_pid, "portable": args.portable})
     return run_wizard()
 
 

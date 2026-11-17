@@ -84,8 +84,13 @@ foreach ($tool in @("ffmpeg.exe", "ffprobe.exe")) {
 }
 
 Write-Host "Cleaning build folders..."
-foreach ($target in @($stage, $payloadDir, (Join-Path $work "app-folder"), (Join-Path $work "single-exe"), (Join-Path $work "setup"))) {
+foreach ($target in @($payloadDir, (Join-Path $work "app-folder"), (Join-Path $work "single-exe"), (Join-Path $work "setup"))) {
     Remove-Target $target
+}
+# A copy started from build\stage keeps its files locked; build next to it instead of failing.
+try { Remove-Target $stage } catch {
+    $stage = Join-Path $work ("stage-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $warnings += "build\stage is in use (is Fair Sorting running from there?), so this build used $stage."
 }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 

@@ -848,7 +848,7 @@ function ghostOut(target = null, onLand = null) {
     left: `${sr.left}px`, top: `${sr.top}px`, width: `${sr.width}px`, height: `${sr.height}px`,
     transformOrigin: `${r.left - sr.left + r.width / 2}px ${r.top - sr.top + r.height / 2}px`,
   })
-  el.classList.add('ghost')
+  el.classList.add('media-ghost')
   box.append(el)
   document.body.append(box)
   const t = target && target.isConnected && target.offsetParent !== null ? target.getBoundingClientRect() : null
@@ -1948,8 +1948,13 @@ function endTour() {
   S.tour = false
   document.removeEventListener('keydown', tourKeys, true)
   removeEventListener('resize', placeTour)
-  if (reduceMotion.matches) node.remove()
-  else node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 180 }).onfinish = () => node.remove()
+  // Stop catching clicks right away; never let removal depend on an animation
+  // finishing (it doesn't while the window isn't painting).
+  node.style.pointerEvents = 'none'
+  const remove = () => node.remove()
+  if (reduceMotion.matches) { remove(); return }
+  node.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 180 }).onfinish = remove
+  setTimeout(remove, 260)
 }
 
 function tourGo(delta) {

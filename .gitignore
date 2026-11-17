@@ -13,3 +13,7 @@ move_log_*.txt
 FINAL_BUILD/build/
 FINAL_BUILD/dist/
 FINAL_BUILD/ffmpeg/
+
+# build log and local archive
+FINAL_BUILD/*.log
+SAVE POINT/

@@ -140,6 +140,7 @@ ul.tips li { display: flex; gap: 10px; align-items: center; }
 </div>
 <script>
 const $ = id => document.getElementById(id)
+const AUTO = false  // true when the app started us to update itself
 let api = null, dir = '', phase = 'welcome', busy = false
 
 function show(id) {
@@ -168,7 +169,14 @@ async function init() {
     $('sub').textContent = `Version ${info.existing.version} is installed. Your settings, PIN and destinations stay as they are.`
     $('go').textContent = same ? 'Reinstall' : 'Update'
   }
-  if (!info.payload) { error('This setup file is missing the app. Download it again.'); $('go').disabled = true }
+  if (!info.payload) { error('This setup file is missing the app. Download it again.'); $('go').disabled = true; return }
+  if (AUTO) {
+    // Started by the app's updater: no questions, just update and reopen.
+    $('startmenu').checked = false
+    $('desktop').checked = false
+    $('go').textContent = 'Update'
+    $('go').click()
+  }
 }
 
 async function poll() {
@@ -178,6 +186,12 @@ async function poll() {
   $('bar').style.setProperty('--p', s.pct || 0)
   $('stage').textContent = (s.stage || '').toLowerCase()
   if (s.error) { error(s.error); return }
+  if (s.done && AUTO) {
+    $('ptitle').textContent = 'Updated.'
+    $('stage').textContent = 'opening fair sorting…'
+    setTimeout(() => api.finish(true), 700)
+    return
+  }
   if (s.done) {
     $('where').textContent = $('desktop').checked && $('startmenu').checked
       ? 'Find Fair Sorting in the Start menu and on your desktop.'
@@ -206,7 +220,7 @@ $('go').onclick = async () => {
   $('err').hidden = true
   $('go').disabled = true
   $('cancel').hidden = true
-  $('ptitle').textContent = $('go').textContent === 'Install' ? 'Installing…' : 'Updating…'
+  $('ptitle').textContent = $('go').textContent === 'Install' ? 'Installing…' : 'Updating to v__VERSION__…'
   show('progress')
   await api.install(dir, $('desktop').checked, $('startmenu').checked)
   poll()

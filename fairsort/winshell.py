@@ -270,10 +270,12 @@ def recycle(path: str, owner: int = 0):
         result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
         if op.fAnyOperationsAborted:
             raise OSError("Delete was cancelled")
+        if result in (5, 32, 33):  # in use: carry winerror so callers can retry
+            raise OSError(13, "The file is in use by another program", path, 32)
         if result != 0:
             raise OSError(f"Windows could not delete the file (code {result})")
         if os.path.exists(path):
-            raise OSError("The file is still there; it may be in use")
+            raise OSError(13, "The file is still there; it may be in use", path, 32)
         return
     try:
         from send2trash import send2trash  # type: ignore

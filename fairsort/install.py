@@ -196,7 +196,7 @@ def _is_running(target: Path) -> bool:
         return False
 
 
-def install(payload: Path, chosen_dir: str, desktop: bool, start_menu: bool, progress=None) -> Path:
+def install(payload: Path, chosen_dir: str, desktop: bool, start_menu: bool, progress=None, register_app: bool = True) -> Path:
     """Extract the app folder, write the manifest, shortcuts and Apps entry."""
     report = progress or (lambda pct, stage: None)
     target = normalize_target(chosen_dir)
@@ -249,14 +249,15 @@ def install(payload: Path, chosen_dir: str, desktop: bool, start_menu: bool, pro
             written.append(rel)
     (target / MANIFEST).write_text("\n".join(written + [MANIFEST]) + "\n", encoding="utf-8")
 
-    report(0.94, "Adding shortcuts")
-    try:
-        make_shortcuts(target, desktop, start_menu)
-    except (OSError, subprocess.SubprocessError):
-        pass
-    report(0.98, "Registering")
-    if IS_WINDOWS:
-        register(target)
+    if register_app:  # portable folders get neither shortcuts nor an Apps entry
+        report(0.94, "Adding shortcuts")
+        try:
+            make_shortcuts(target, desktop, start_menu)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        report(0.98, "Registering")
+        if IS_WINDOWS:
+            register(target)
     report(1.0, "Done")
     return target
 

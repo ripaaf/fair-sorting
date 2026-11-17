@@ -84,3 +84,27 @@ def is_within(path: str, root: str) -> bool:
     if p == r:
         return True
     return p.startswith(r.rstrip("\\/") + os.sep)
+
+
+def open_shared(path: str, sequential: bool = True):
+    """Open for reading while still letting the file be moved, renamed or deleted.
+
+    Python's open() doesn't pass FILE_SHARE_DELETE on Windows, so a video that is
+    streaming to the player would block "move to folder". CreateFileW with all
+    share flags behaves like POSIX instead.
+    """
+    if not IS_WINDOWS:
+        return open(path, "rb")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    create = ctypes.windll.kernel32.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    flags = 0x08000000 if sequential else 0x10000000  # SEQUENTIAL_SCAN / RANDOM_ACCESS hint
+    handle = create(path, 0x80000000, 0x1 | 0x2 | 0x4, None, 3, flags, None)  # GENERIC_READ, share all, OPEN_EXISTING
+    if handle in (None, wintypes.HANDLE(-1).value):
+        return open(path, "rb")  # let Python raise a normal, readable error
+    fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    return os.fdopen(fd, "rb")

@@ -280,7 +280,11 @@ def probe(path: str) -> dict:
         except ValueError:
             info["bitrate"] = 0
         tags = {str(k).lower(): v for k, v in (fmt.get("tags") or {}).items()}
-        info["tags"] = {k: tags[k] for k in ("title", "artist", "album", "date", "creation_time") if tags.get(k)}
+        info["tags"] = {
+            k: tags[k]
+            for k in ("title", "artist", "album", "album_artist", "genre", "track", "date", "creation_time")
+            if tags.get(k)
+        }
         for stream in data.get("streams") or []:
             kind = stream.get("codec_type")
             disposition = stream.get("disposition") or {}
@@ -421,7 +425,42 @@ def describe(path: str) -> dict:
                 info["channels"] = data["audio"]["channels"]
                 info["rate"] = data["audio"]["rate"]
             info["cover"] = bool(data.get("cover"))
+        if kind == "audio" and not info.get("cover"):
+            info["cover"] = folder_art(path) is not None
     return info
+
+
+# Music rips usually ship the album art next to the tracks.
+FOLDER_ART_NAMES = ("cover", "folder", "front", "album", "albumart", "albumartsmall", "artwork")
+FOLDER_ART_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+_art_cache: dict[str, tuple[float, str | None]] = {}
+
+
+def folder_art(path: str) -> str | None:
+    folder = os.path.dirname(os.path.abspath(path))
+    try:
+        stamp = os.stat(folder).st_mtime
+    except OSError:
+        return None
+    cached = _art_cache.get(folder)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    found = None
+    for stem in FOLDER_ART_NAMES:
+        for ext in FOLDER_ART_EXTS:
+            for name in (stem + ext, stem.capitalize() + ext, stem.upper() + ext):
+                candidate = os.path.join(folder, name)
+                if os.path.isfile(candidate):
+                    found = candidate
+                    break
+            if found:
+                break
+        if found:
+            break
+    _art_cache[folder] = (stamp, found)
+    if len(_art_cache) > 256:
+        _art_cache.pop(next(iter(_art_cache)))
+    return found
 
 
 # ------------------------------------------------------------------- image decode
@@ -617,9 +656,19 @@ def _build_thumbnail(path: str, size: int) -> Image.Image | None:
         return frame
     if kind == "audio":
         info = probe(path)
-        if info and not info.get("cover"):
-            return None
-        return _ffmpeg_frame(path, max_width=size * 2, timeout=10)
+        if not info or info.get("cover"):
+            frame = _ffmpeg_frame(path, max_width=size * 2, timeout=10)
+            if frame is not None:
+                return frame
+        art = folder_art(path)
+        if art:
+            try:
+                im = Image.open(art)
+                im.draft("RGB", (size * 2, size * 2))
+                im.load()
+                return ImageOps.exif_transpose(im) or im
+            except Exception:
+                return None
     return None
 
 
